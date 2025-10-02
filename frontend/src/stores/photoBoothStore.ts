@@ -12,6 +12,7 @@ interface PhotoBoothStore extends PhotoBoothState {
   deselectPhoto: (photoId: string) => void;
   selectMultiplePhotos: (photoIds: string[]) => Promise<void>;
   setTemplate: (template: Template) => void;
+  updatePhotoInterval: (ms: number) => Promise<void>;
   generatePhotostrip: () => Promise<string>;
   generatePhotostripLandscape: () => Promise<string>;
   generatePhotostripPortrait: () => Promise<string>;
@@ -161,6 +162,29 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     set({ currentTemplate: template });
   },
 
+  updatePhotoInterval: async (ms: number) => {
+    const { session } = get();
+    if (!session) throw new Error('No active session');
+    try {
+      const safeInterval = Math.min(Math.max(ms, 1000), 60000);
+      const response = await sessionService.updateSession(session.sessionId, {
+        settings: { photoInterval: safeInterval },
+      });
+      set((state) => ({
+        session: state.session ? {
+          ...state.session,
+          settings: {
+            ...state.session.settings,
+            ...response.session.settings,
+          },
+        } : null,
+      }));
+    } catch (error) {
+      console.error('Failed to update photo interval:', error);
+      throw error;
+    }
+  },
+
   generatePhotostrip: async (): Promise<string> => {
     const { session, selectedPhotos, currentTemplate } = get();
     
@@ -169,6 +193,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     if (selectedPhotos.length === 0) throw new Error('No photos selected');
 
     try {
+      const hasTemplateSlots = (currentTemplate.photoSlots?.length || 0) >= selectedPhotos.length;
       const tw = (currentTemplate.dimensions?.width as any) || (1800 as any);
       const th = (currentTemplate.dimensions?.height as any) || (1200 as any);
       const response = await sessionService.generatePhotostrip(session.sessionId, {
@@ -177,7 +202,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
         targetWidth: tw,
         targetHeight: th,
         forceOrientation: th >= tw ? 'portrait' : 'landscape',
-        customization: { autoLayout: true } as any,
+  customization: (hasTemplateSlots ? { autoLayout: false } : { autoLayout: true, padding: 24, borderRadius: 32 }) as any,
       } as any);
 
       set((state) => ({
@@ -202,13 +227,14 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     if (!session) throw new Error('No active session');
     if (!currentTemplate) throw new Error('No template selected');
     if (selectedPhotos.length === 0) throw new Error('No photos selected');
+    const hasTemplateSlots = (currentTemplate.photoSlots?.length || 0) >= selectedPhotos.length;
     const response = await sessionService.generatePhotostrip(session.sessionId, {
       templateId: currentTemplate._id,
       selectedPhotoIds: selectedPhotos.map(p => p._id),
       targetWidth: 1800,
       targetHeight: 1200,
       forceOrientation: 'landscape',
-      customization: { autoLayout: true },
+  customization: (hasTemplateSlots ? { autoLayout: false } : { autoLayout: true, padding: 24, borderRadius: 32 }) as any,
     } as any);
     set((state) => ({
       session: state.session ? {
@@ -227,13 +253,14 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     if (!session) throw new Error('No active session');
     if (!currentTemplate) throw new Error('No template selected');
     if (selectedPhotos.length === 0) throw new Error('No photos selected');
+    const hasTemplateSlots = (currentTemplate.photoSlots?.length || 0) >= selectedPhotos.length;
     const response = await sessionService.generatePhotostrip(session.sessionId, {
       templateId: currentTemplate._id,
       selectedPhotoIds: selectedPhotos.map(p => p._id),
       targetWidth: 1200,
       targetHeight: 1800,
       forceOrientation: 'portrait',
-      customization: { autoLayout: true },
+  customization: (hasTemplateSlots ? { autoLayout: false } : { autoLayout: true, padding: 24, borderRadius: 32 }) as any,
     } as any);
     set((state) => ({
       session: state.session ? {

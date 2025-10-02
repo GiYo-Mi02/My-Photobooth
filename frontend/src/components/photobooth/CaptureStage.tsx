@@ -16,20 +16,22 @@ const CaptureStage = () => {
   const webcamRef = useRef<Webcam>(null);
   const [isCountingDown, setIsCountingDown] = useState(false);
   const [countdown, setCountdown] = useState(5);
+  const [isUpdatingInterval, setIsUpdatingInterval] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const countdownTimerRef = useRef<number | null>(null);
-  const loopTimerRef = useRef<number | null>(null);
   const captureLockRef = useRef(false);
 
   const { 
+    session,
     photos, 
     currentPhotoNumber, 
     uploadPhoto, 
     nextStage,
     isCapturing,
     startCapturing,
-    stopCapturing
+    stopCapturing,
+    updatePhotoInterval,
   } = usePhotoBoothStore();
 
   // Initialize with a static value to avoid TDZ when React evaluates hooks
@@ -65,6 +67,11 @@ const CaptureStage = () => {
     }
   };
 
+  const MANUAL_COUNTDOWN_SECONDS = 5;
+  const timerOptions = [5000, 10000, 15000];
+  const autoIntervalMs = Math.max(session?.settings?.photoInterval ?? 15000, 1000);
+  const autoCountdownSeconds = Math.max(1, Math.round(autoIntervalMs / 1000));
+
   const startCountdown = () => {
     if (photos.length >= 10) {
       nextStage();
@@ -73,7 +80,7 @@ const CaptureStage = () => {
     if (isCapturing || captureLockRef.current) return;
 
     setIsCountingDown(true);
-    setCountdown(5);
+    setCountdown(MANUAL_COUNTDOWN_SECONDS);
 
     const timer = window.setInterval(() => {
       setCountdown((prev) => {
@@ -81,7 +88,7 @@ const CaptureStage = () => {
           window.clearInterval(timer);
           setIsCountingDown(false);
           capturePhoto();
-          return 5;
+          return MANUAL_COUNTDOWN_SECONDS;
         }
         return prev - 1;
       });
@@ -95,8 +102,14 @@ const CaptureStage = () => {
     capturePhoto();
   };
 
-  // Auto-capture loop controller
-  const queueNextAutoCapture = () => {
+  const clearAutoCountdown = () => {
+    if (countdownTimerRef.current) {
+      window.clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+  };
+
+  const startAutoCountdown = () => {
     if (!isCapturingRef.current) return;
     const { photos: currentPhotos } = usePhotoBoothStore.getState();
     if (currentPhotos.length >= 10) {
@@ -104,76 +117,91 @@ const CaptureStage = () => {
       nextStage();
       return;
     }
-    // Start a countdown and after capture, schedule the next run
+
+    clearAutoCountdown();
     setIsCountingDown(true);
-    setCountdown(5);
-    // Clear any existing countdown interval
-    if (countdownTimerRef.current) {
-      window.clearInterval(countdownTimerRef.current);
-      countdownTimerRef.current = null;
-    }
-    const intervalId = window.setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          window.clearInterval(intervalId);
-          countdownTimerRef.current = null;
-          setIsCountingDown(false);
-          capturePhoto().finally(() => {
-            // Wait a short moment before queuing next countdown to allow state to update
-            if (loopTimerRef.current) {
-              window.clearTimeout(loopTimerRef.current);
-              loopTimerRef.current = null;
+    setCountdown(autoCountdownSeconds);
+
+    let secondsRemaining = autoCountdownSeconds;
+    countdownTimerRef.current = window.setInterval(() => {
+      secondsRemaining -= 1;
+
+      if (secondsRemaining <= 0) {
+        clearAutoCountdown();
+        setIsCountingDown(false);
+
+        capturePhoto()
+          .catch(() => {})
+          .finally(() => {
+            if (!isCapturingRef.current) return;
+            const { photos: updatedPhotos } = usePhotoBoothStore.getState();
+            if (updatedPhotos.length >= 10) {
+              handleStopAuto();
+              nextStage();
+              return;
             }
-            loopTimerRef.current = window.setTimeout(() => {
-              queueNextAutoCapture();
+
+            window.setTimeout(() => {
+              if (isCapturingRef.current) {
+                startAutoCountdown();
+              }
             }, 250);
           });
-          return 5;
-        }
-        return prev - 1;
-      });
+
+        secondsRemaining = autoCountdownSeconds;
+        return;
+      }
+
+      setCountdown(secondsRemaining);
     }, 1000);
-    countdownTimerRef.current = intervalId;
+  };
+
+  const handleTimerChange = async (ms: number) => {
+    if (!session) return;
+    if (session.settings.photoInterval === ms) return;
+    const wasCapturing = isCapturingRef.current;
+    if (wasCapturing) {
+      handleStopAuto();
+    }
+    setIsUpdatingInterval(true);
+    try {
+      await updatePhotoInterval(ms);
+      toast.success(`Auto-capture set to ${Math.round(ms / 1000)} seconds`);
+      clearAutoCountdown();
+      if (wasCapturing && photos.length < 10) {
+        window.setTimeout(() => {
+          handleStartAuto();
+        }, 200);
+      }
+    } catch (error) {
+      console.error('Failed to update auto-capture interval:', error);
+      toast.error('Failed to update timer');
+    } finally {
+      setIsUpdatingInterval(false);
+    }
   };
 
   const handleStartAuto = () => {
     if (isCapturing || isCountingDown) return;
     if (captureLockRef.current) return;
-    // Clear any stale timers/flags before starting
-    if (countdownTimerRef.current) {
-      window.clearInterval(countdownTimerRef.current);
-      countdownTimerRef.current = null;
-    }
-    if (loopTimerRef.current) {
-      window.clearTimeout(loopTimerRef.current);
-      loopTimerRef.current = null;
-    }
+    clearAutoCountdown();
     setIsCountingDown(false);
     isCapturingRef.current = true; // ensure immediate read reflects capturing
     startCapturing();
-    // kick off on next task to avoid same-tick stale reads
-    window.setTimeout(() => queueNextAutoCapture(), 0);
+    startAutoCountdown();
   };
 
   const handleStopAuto = () => {
     stopCapturing();
     isCapturingRef.current = false;
-    if (countdownTimerRef.current) window.clearInterval(countdownTimerRef.current);
-    if (loopTimerRef.current) window.clearTimeout(loopTimerRef.current);
+    clearAutoCountdown();
     setIsCountingDown(false);
   };
 
   useEffect(() => {
     if (photos.length >= 10) {
       // ensure timers are stopped to prevent over-capture
-      if (countdownTimerRef.current) {
-        window.clearInterval(countdownTimerRef.current);
-        countdownTimerRef.current = null;
-      }
-      if (loopTimerRef.current) {
-        window.clearTimeout(loopTimerRef.current);
-        loopTimerRef.current = null;
-      }
+      clearAutoCountdown();
       setIsCountingDown(false);
       stopCapturing();
       setTimeout(() => {
@@ -185,14 +213,8 @@ const CaptureStage = () => {
   useEffect(() => {
     // Cleanup timers on unmount
     return () => {
-      if (countdownTimerRef.current) {
-        window.clearInterval(countdownTimerRef.current);
-        countdownTimerRef.current = null;
-      }
-      if (loopTimerRef.current) {
-        window.clearTimeout(loopTimerRef.current);
-        loopTimerRef.current = null;
-      }
+      clearAutoCountdown();
+      captureLockRef.current = false;
     };
   }, []);
 
@@ -273,6 +295,28 @@ const CaptureStage = () => {
 
         {/* Controls */}
         <div className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <span className="font-medium text-gray-700">Auto Timer:</span>
+            {timerOptions.map((option) => {
+              const seconds = Math.round(option / 1000);
+              const isActive = autoIntervalMs === option;
+              return (
+                <button
+                  key={option}
+                  onClick={() => handleTimerChange(option)}
+                  disabled={isUpdatingInterval || captureLockRef.current}
+                  className={`px-3 py-2 rounded-full border transition-colors ${
+                    isActive
+                      ? 'bg-primary-500 text-white border-primary-500 shadow'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                  } ${isUpdatingInterval ? 'opacity-70 cursor-wait' : ''}`}
+                >
+                  {seconds}s
+                </button>
+              );
+            })}
+          </div>
+
           {photos.length < 10 && (
             <>
               <button
@@ -288,7 +332,7 @@ const CaptureStage = () => {
                 ) : (
                   <>
                     <FiPlay className="mr-2 h-5 w-5" />
-                    Start 5s Timer
+                    Start {MANUAL_COUNTDOWN_SECONDS}s Timer
                   </>
                 )}
               </button>
@@ -309,7 +353,7 @@ const CaptureStage = () => {
                   className="btn-ghost inline-flex items-center justify-center"
                 >
                   <FiPlay className="mr-2 h-5 w-5" />
-                  Auto-capture (every 5s)
+                  Auto-capture (every {autoCountdownSeconds}s)
                 </button>
               ) : (
                 <button

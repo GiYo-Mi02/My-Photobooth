@@ -60,10 +60,10 @@ const CompleteStage = () => {
           <title>Print Photostrip - GioPix</title>
           <style>
             /* Hint printers for 4x6 inch borderless (landscape). If template is 2000x1600, this remains a close ratio. */
-            @page { size: 6in 4in; margin: 0; }
+            @page { size: 4in 6in; margin: 0; }
             html, body { height: 100%; }
             body { margin: 0; display: flex; align-items: center; justify-content: center; background: #fff; }
-            img { width: 100%; height: 100%; object-fit: contain; }
+            img { width: 100%; height: 100%; object-fit: cover; }
           </style>
         </head>
         <body>
