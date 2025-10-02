@@ -1,4 +1,5 @@
-import { FiHeart, FiCamera } from 'react-icons/fi';
+import { FiHeart } from 'react-icons/fi';
+import GPixLogo from '../assets/GPixLogo.png';
 
 const Footer = () => {
   return (
@@ -7,13 +8,17 @@ const Footer = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           {/* Brand */}
       <div className="col-span-1 md:col-span-2">
-            <div className="flex items-center space-x-2 mb-4">
-        <FiCamera className="h-6 w-6 text-secondary-500" />
-        <span className="text-lg font-bold text-gray-900">GioPix</span>
+            <div className="flex items-center space-x-3 mb-4">
+        <img
+          src={GPixLogo}
+          alt="GPix logo"
+          className="h-8 w-8 rounded-lg shadow-sm ring-1 ring-cream-200"
+        />
+        <span className="text-lg font-bold text-gray-900 tracking-tight">GPix</span>
             </div>
             <p className="text-gray-600 text-sm max-w-md">
-              Create memorable moments with our interactive photobooth experience. 
-              Take photos, apply filters, and generate beautiful photostrips instantly.
+              Capture modern memories with the reimagined GPix photobooth experience.
+              Snap photos, apply creative filters, and craft beautifully branded photostrips in seconds.
             </p>
           </div>
 
@@ -28,7 +33,7 @@ const Footer = () => {
               </li>
               <li>
                 <a href="/photobooth" className="text-sm text-gray-600 hover:text-gray-900 transition-colors duration-200">
-                  GioPix
+                  GPix Booth
                 </a>
               </li>
               <li>
@@ -61,10 +66,10 @@ const Footer = () => {
         <div className="border-t border-gray-200 pt-6 mt-8">
           <div className="flex flex-col sm:flex-row justify-between items-center">
             <p className="text-sm text-gray-600">
-              © {new Date().getFullYear()} GioPix. All rights reserved.
+              © {new Date().getFullYear()} GPix. All rights reserved.
             </p>
             <p className="text-sm text-gray-600 flex items-center mt-2 sm:mt-0">
-              Made with <FiHeart className="h-4 w-4 text-red-500 mx-1" /> by GioPix
+              Made with <FiHeart className="h-4 w-4 text-red-500 mx-1" /> by GPix Studios
             </p>
           </div>
         </div>

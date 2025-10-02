@@ -24,7 +24,7 @@ const IntroStage = () => {
         <div className="mb-8">
           <FiCamera className="h-24 w-24 text-primary-600 mx-auto mb-6" />
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-            Welcome to GioPix
+            Welcome to GPix
           </h1>
           <p className="text-xl text-gray-600 mb-8">
             Get ready to capture amazing moments! You'll have 10 photo opportunities 
@@ -59,7 +59,7 @@ const IntroStage = () => {
           className="bg-primary-600 hover:bg-primary-700 text-white font-semibold px-12 py-4 rounded-xl text-xl transition-colors duration-200 inline-flex items-center justify-center"
         >
           <FiPlay className="mr-3 h-6 w-6" />
-          Start GioPix Session
+          Start GPix Session
         </button>
       </motion.div>
     </div>

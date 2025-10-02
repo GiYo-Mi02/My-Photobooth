@@ -17,7 +17,7 @@
 
 @layer components {
   .btn-primary {
-    @apply bg-secondary-500 hover:bg-secondary-600 text-gray-900 font-semibold px-6 py-3 rounded-xl transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
+    @apply bg-primary-500 hover:bg-primary-600 text-white font-semibold px-6 py-3 rounded-xl transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
   }
 
   .btn-secondary {
@@ -123,7 +123,7 @@
 
 /* Loading animation */
 .loading-spinner {
-  @apply animate-spin rounded-full border-4 border-cream-200 border-t-secondary-500;
+  @apply animate-spin rounded-full border-4 border-cream-200 border-t-primary-500;
 }
 
 /* Camera filters */

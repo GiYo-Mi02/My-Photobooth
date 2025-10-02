@@ -13,7 +13,7 @@ const Home = () => {
   ];
 
   const steps = [
-    { step: '01', title: 'Start Session', description: 'Click start to begin your GioPix session.' },
+    { step: '01', title: 'Start Session', description: 'Click start to begin your GPix session.' },
     { step: '02', title: 'Take Photos', description: 'Capture up to 10 photos with 5-second intervals.' },
     { step: '03', title: 'Select & Filter', description: 'Choose your favorites and apply filters.' },
     { step: '04', title: 'Generate Strip', description: 'Create and download your custom photostrip.' },
@@ -28,15 +28,15 @@ const Home = () => {
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }} className="text-center">
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold font-display mb-6">
               Create Amazing
-              <span className="block text-secondary-300">GioPix Memories</span>
+              <span className="block text-secondary-300">GPix Moments</span>
             </h1>
             <p className="text-xl sm:text-2xl text-primary-100 mb-8 max-w-3xl mx-auto">
               Take photos, apply filters, and create beautiful photostrips with our interactive photobooth experience.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/photobooth" className="bg-secondary-500 hover:bg-secondary-600 text-gray-900 font-semibold px-8 py-4 rounded-xl text-lg transition-colors duration-200 inline-flex items-center justify-center shadow">
+              <Link to="/photobooth" className="btn-primary inline-flex items-center justify-center text-lg shadow">
                 <FiCamera className="mr-2 h-5 w-5" />
-                Start GioPix
+                Start GPix
               </Link>
               <Link to="/register" className="bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 text-white font-semibold px-8 py-4 rounded-xl text-lg transition-colors duration-200">
                 Create Account
@@ -92,9 +92,9 @@ const Home = () => {
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }} viewport={{ once: true }}>
             <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">Ready to Get Started?</h2>
             <p className="text-xl text-primary-100 mb-8 max-w-2xl mx-auto">Create your first photostrip today and experience the magic of our interactive photobooth.</p>
-            <Link to="/photobooth" className="bg-secondary-500 hover:bg-secondary-600 text-gray-900 font-semibold px-8 py-4 rounded-xl text-lg transition-colors duration-200 inline-flex items-center justify-center shadow">
+            <Link to="/photobooth" className="btn-primary inline-flex items-center justify-center text-lg shadow">
               <FiCamera className="mr-2 h-5 w-5" />
-              Launch GioPix
+              Launch GPix
             </Link>
           </motion.div>
         </div>

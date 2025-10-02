@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { FiCamera, FiUser, FiLogOut, FiSettings } from 'react-icons/fi';
+import { FiUser, FiLogOut, FiSettings } from 'react-icons/fi';
+import GPixLogo from '../assets/GPixLogo.png';
 
 const Header = () => {
   const { user, isAuthenticated, logout } = useAuthStore();
@@ -16,9 +17,13 @@ const Header = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link to="/" className="flex items-center space-x-2 group">
-            <FiCamera className="h-8 w-8 text-secondary-500 group-hover:text-secondary-600 transition-colors" />
-            <span className="text-xl font-bold text-gray-900">GioPix</span>
+          <Link to="/" className="flex items-center space-x-3 group">
+            <img
+              src={GPixLogo}
+              alt="GPix logo"
+              className="h-9 w-9 rounded-xl shadow-sm ring-1 ring-cream-200 group-hover:ring-primary-400 transition"
+            />
+            <span className="text-xl font-bold text-gray-900 tracking-tight group-hover:text-primary-400 transition-colors">GPix</span>
           </Link>
 
           {/* Navigation */}
@@ -33,7 +38,7 @@ const Header = () => {
               to="/photobooth" 
               className="text-gray-600 hover:text-gray-900 transition-colors duration-200"
             >
-              GioPix
+              GPix
             </Link>
             {isAuthenticated && user?.role === 'admin' && (
               <Link 
@@ -112,7 +117,7 @@ const Header = () => {
             to="/photobooth" 
             className="block px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-cream-100 rounded-md transition-colors duration-200"
           >
-            GioPix
+            GPix
           </Link>
           {isAuthenticated && user?.role === 'admin' && (
             <Link 
