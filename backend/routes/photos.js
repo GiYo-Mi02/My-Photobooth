@@ -65,14 +65,23 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
     // Find or create session
     let session = await Session.findOne({ sessionId });
     if (!session) {
-      session = new Session({ sessionId });
+      session = new Session({
+        sessionId,
+        metadata: {
+          userAgent: req.headers["user-agent"],
+          ipAddress: req.ip,
+          startTime: new Date(),
+        },
+      });
       await session.save();
     }
 
     // Enforce max 10 photos per session using atomic increment
     // Attempt to increment; if already at limit, reject
+    const maxPhotosSetting = Number(session.settings?.maxPhotos) || 10;
+
     const updatedSession = await Session.findOneAndUpdate(
-      { _id: session._id, totalPhotos: { $lt: 10 } },
+      { _id: session._id, totalPhotos: { $lt: maxPhotosSetting } },
       { $inc: { totalPhotos: 1 } },
       { new: true }
     );
@@ -144,14 +153,41 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
 
     await photo.save();
 
+    let sessionNeedsSave = false;
+    if (!updatedSession.metadata) {
+      updatedSession.metadata = {};
+      sessionNeedsSave = true;
+    }
+    if (!updatedSession.metadata.startTime) {
+      updatedSession.metadata.startTime =
+        session.metadata?.startTime || new Date();
+      sessionNeedsSave = true;
+    }
+
     // Update session status/timestamps if reached 10
     if (updatedSession.totalPhotos >= 10) {
+      const endTime = new Date();
       updatedSession.status = "completed";
-      updatedSession.metadata.endTime = new Date();
-      updatedSession.metadata.duration =
-        updatedSession.metadata.endTime - updatedSession.metadata.startTime;
+      updatedSession.metadata = {
+        ...updatedSession.metadata,
+        endTime,
+        duration: updatedSession.metadata.startTime
+          ? endTime.getTime() -
+            new Date(updatedSession.metadata.startTime).getTime()
+          : undefined,
+      };
+      sessionNeedsSave = true;
+    }
+
+    if (sessionNeedsSave) {
+      updatedSession.markModified("metadata");
       await updatedSession.save();
     }
+
+    const maxPhotos =
+      Number(updatedSession.settings?.maxPhotos) || maxPhotosSetting || 10;
+    const remainingSlots = Math.max(0, maxPhotos - updatedSession.totalPhotos);
+    const nextPhotoNumber = Math.min(maxPhotos, updatedSession.totalPhotos + 1);
 
     res.status(201).json({
       message: "Photo uploaded successfully",
@@ -160,6 +196,9 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
         id: updatedSession.sessionId,
         totalPhotos: updatedSession.totalPhotos,
         status: updatedSession.status,
+        remainingSlots,
+        nextPhotoNumber,
+        settings: updatedSession.settings,
       },
     });
   } catch (error) {

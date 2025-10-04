@@ -19,7 +19,8 @@ const CaptureStage = () => {
   const [isUpdatingInterval, setIsUpdatingInterval] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
-  const countdownTimerRef = useRef<number | null>(null);
+  const countdownTimeoutRef = useRef<number | null>(null);
+  const remainingSecondsRef = useRef<number>(0);
   const captureLockRef = useRef(false);
 
   const { 
@@ -36,6 +37,7 @@ const CaptureStage = () => {
 
   // Initialize with a static value to avoid TDZ when React evaluates hooks
   const isCapturingRef = useRef(false);
+  const maxPhotos = Math.max(1, session?.settings?.maxPhotos ?? 10);
 
   useEffect(() => {
     isCapturingRef.current = isCapturing;
@@ -44,7 +46,7 @@ const CaptureStage = () => {
   const capturePhoto = async () => {
     if (captureLockRef.current) return;
     if (!webcamRef.current) return;
-    if (photos.length >= 10) return;
+    if (photos.length >= maxPhotos) return;
 
     try {
       captureLockRef.current = true;
@@ -73,7 +75,7 @@ const CaptureStage = () => {
   const autoCountdownSeconds = Math.max(1, Math.round(autoIntervalMs / 1000));
 
   const startCountdown = () => {
-    if (photos.length >= 10) {
+    if (photos.length >= maxPhotos) {
       nextStage();
       return;
     }
@@ -98,62 +100,76 @@ const CaptureStage = () => {
   const handleManualCapture = () => {
     if (isCountingDown) return;
     if (captureLockRef.current) return;
-    if (photos.length >= 10) return;
+    if (photos.length >= maxPhotos) return;
     capturePhoto();
   };
 
-  const clearAutoCountdown = () => {
-    if (countdownTimerRef.current) {
-      window.clearInterval(countdownTimerRef.current);
-      countdownTimerRef.current = null;
+  const clearCountdownTimer = () => {
+    if (countdownTimeoutRef.current) {
+      window.clearTimeout(countdownTimeoutRef.current);
+      countdownTimeoutRef.current = null;
     }
   };
 
-  const startAutoCountdown = () => {
-    if (!isCapturingRef.current) return;
-    const { photos: currentPhotos } = usePhotoBoothStore.getState();
-    if (currentPhotos.length >= 10) {
-      stopCapturing();
-      nextStage();
+  const clearAutoTimers = () => {
+    clearCountdownTimer();
+    remainingSecondsRef.current = 0;
+  };
+
+  const runAutoCountdown = async () => {
+    if (!isCapturingRef.current) {
+      clearAutoTimers();
       return;
     }
 
-    clearAutoCountdown();
-    setIsCountingDown(true);
-    setCountdown(autoCountdownSeconds);
+    remainingSecondsRef.current -= 1;
 
-    let secondsRemaining = autoCountdownSeconds;
-    countdownTimerRef.current = window.setInterval(() => {
-      secondsRemaining -= 1;
+    if (remainingSecondsRef.current <= 0) {
+      clearCountdownTimer();
+      setCountdown(0);
+      setIsCountingDown(false);
 
-      if (secondsRemaining <= 0) {
-        clearAutoCountdown();
-        setIsCountingDown(false);
+      try {
+        await capturePhoto();
+      } catch (error) {
+        console.error('Auto capture failed:', error);
+      }
 
-        capturePhoto()
-          .catch(() => {})
-          .finally(() => {
-            if (!isCapturingRef.current) return;
-            const { photos: updatedPhotos } = usePhotoBoothStore.getState();
-            if (updatedPhotos.length >= 10) {
-              handleStopAuto();
-              nextStage();
-              return;
-            }
-
-            window.setTimeout(() => {
-              if (isCapturingRef.current) {
-                startAutoCountdown();
-              }
-            }, 250);
-          });
-
-        secondsRemaining = autoCountdownSeconds;
+      if (!isCapturingRef.current) {
+        clearAutoTimers();
         return;
       }
 
-      setCountdown(secondsRemaining);
-    }, 1000);
+      const { photos: updatedPhotos } = usePhotoBoothStore.getState();
+      if (updatedPhotos.length >= maxPhotos) {
+        handleStopAuto();
+        return;
+      }
+
+      scheduleAutoCapture();
+      return;
+    }
+
+    setCountdown(remainingSecondsRef.current);
+    countdownTimeoutRef.current = window.setTimeout(runAutoCountdown, 1000);
+  };
+
+  const scheduleAutoCapture = () => {
+    if (!isCapturingRef.current) return;
+
+    const { photos: currentPhotos } = usePhotoBoothStore.getState();
+    if (currentPhotos.length >= maxPhotos) {
+      handleStopAuto();
+      return;
+    }
+
+    clearAutoTimers();
+
+    remainingSecondsRef.current = autoCountdownSeconds;
+    setIsCountingDown(true);
+    setCountdown(autoCountdownSeconds);
+
+    countdownTimeoutRef.current = window.setTimeout(runAutoCountdown, 1000);
   };
 
   const handleTimerChange = async (ms: number) => {
@@ -167,8 +183,10 @@ const CaptureStage = () => {
     try {
       await updatePhotoInterval(ms);
       toast.success(`Auto-capture set to ${Math.round(ms / 1000)} seconds`);
-      clearAutoCountdown();
-      if (wasCapturing && photos.length < 10) {
+      clearAutoTimers();
+      setIsCountingDown(false);
+      setCountdown(Math.round(ms / 1000));
+      if (wasCapturing && photos.length < maxPhotos) {
         window.setTimeout(() => {
           handleStartAuto();
         }, 200);
@@ -184,36 +202,37 @@ const CaptureStage = () => {
   const handleStartAuto = () => {
     if (isCapturing || isCountingDown) return;
     if (captureLockRef.current) return;
-    clearAutoCountdown();
+    clearAutoTimers();
     setIsCountingDown(false);
     isCapturingRef.current = true; // ensure immediate read reflects capturing
     startCapturing();
-    startAutoCountdown();
+    scheduleAutoCapture();
   };
 
   const handleStopAuto = () => {
     stopCapturing();
     isCapturingRef.current = false;
-    clearAutoCountdown();
+    clearAutoTimers();
     setIsCountingDown(false);
   };
 
   useEffect(() => {
-    if (photos.length >= 10) {
+    if (photos.length >= maxPhotos) {
       // ensure timers are stopped to prevent over-capture
-      clearAutoCountdown();
+      clearAutoTimers();
       setIsCountingDown(false);
       stopCapturing();
       setTimeout(() => {
         nextStage();
       }, 600);
     }
-  }, [photos.length, nextStage, stopCapturing]);
+  }, [maxPhotos, nextStage, photos.length, stopCapturing]);
 
   useEffect(() => {
     // Cleanup timers on unmount
     return () => {
-      clearAutoCountdown();
+      clearAutoTimers();
+      setIsCountingDown(false);
       captureLockRef.current = false;
     };
   }, []);
@@ -223,10 +242,10 @@ const CaptureStage = () => {
     if (!autoMode) return;
     if (!cameraReady) return;
     if (isCapturingRef.current) return;
-    if (photos.length >= 10) return;
+    if (photos.length >= maxPhotos) return;
     handleStartAuto();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoMode, cameraReady, photos.length]);
+  }, [autoMode, cameraReady, maxPhotos, photos.length]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
@@ -239,10 +258,10 @@ const CaptureStage = () => {
         {/* Header */}
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Photo {currentPhotoNumber} of 10
+            Photo {Math.min(currentPhotoNumber, maxPhotos)} of {maxPhotos}
           </h1>
           <div className="flex justify-center space-x-2 mb-4">
-            {Array.from({ length: 10 }, (_, i) => (
+            {Array.from({ length: maxPhotos }, (_, i) => (
               <div
                 key={i}
                 className={`w-3 h-3 rounded-full ${
@@ -317,7 +336,7 @@ const CaptureStage = () => {
             })}
           </div>
 
-          {photos.length < 10 && (
+          {photos.length < maxPhotos && (
             <>
               <button
                 onClick={startCountdown}
@@ -372,7 +391,7 @@ const CaptureStage = () => {
               onClick={nextStage}
               className="btn-ghost"
             >
-              Continue to Review ({photos.length} photos)
+              Continue to Review ({photos.length} / {maxPhotos})
             </button>
           )}
         </div>

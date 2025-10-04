@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "module": "Node16",
+    "moduleResolution": "node16",
+    "forceConsistentCasingInFileNames": false
+  },
+  "include": ["./**/*"],
+  "exclude": ["node_modules"]
+}

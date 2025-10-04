@@ -105,18 +105,28 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
         base64Data,
       });
 
+      const updatedSettings = response.session.settings || session.settings;
+      const maxPhotos = updatedSettings?.maxPhotos ?? session.settings?.maxPhotos ?? 10;
+      const nextPhotoNumber = response.session.nextPhotoNumber
+        ? Math.min(maxPhotos + 1, response.session.nextPhotoNumber)
+        : Math.min(maxPhotos + 1, (response.session.totalPhotos || 0) + 1);
+
       set((state) => ({
         photos: [...state.photos, response.photo],
         session: state.session ? {
           ...state.session,
           totalPhotos: response.session.totalPhotos,
           status: response.session.status as 'active' | 'completed' | 'cancelled',
+          settings: {
+            ...state.session.settings,
+            ...(updatedSettings || {}),
+          },
         } : null,
-        currentPhotoNumber: Math.min(11, (response.session.totalPhotos || 0) + 1),
+        currentPhotoNumber: nextPhotoNumber,
       }));
 
-      // Move to review stage if we've taken 10 photos
-      if (response.session.totalPhotos >= 10) {
+  // Move to review stage if we've taken the maximum allowed photos
+      if (response.session.totalPhotos >= maxPhotos) {
         set({ stage: 'review' });
       }
     } catch (error) {

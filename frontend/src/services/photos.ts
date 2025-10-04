@@ -1,5 +1,5 @@
 import { apiClient } from '../lib/api';
-import type { Photo, PhotoFilters, PhotoUploadRequest } from '../types';
+import type { Photo, PhotoFilters, PhotoUploadRequest, SessionSettings } from '../types';
 
 export const photoService = {
   // Upload photo (base64)
@@ -9,6 +9,9 @@ export const photoService = {
       id: string;
       totalPhotos: number;
       status: string;
+      remainingSlots?: number;
+      nextPhotoNumber?: number;
+      settings?: SessionSettings;
     };
     message: string;
   }> {
@@ -18,6 +21,9 @@ export const photoService = {
         id: string;
         totalPhotos: number;
         status: string;
+        remainingSlots?: number;
+        nextPhotoNumber?: number;
+        settings?: SessionSettings;
       };
       message: string;
     }>('/photos/upload', data);
