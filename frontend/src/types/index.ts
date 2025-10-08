@@ -55,6 +55,8 @@ export interface Session {
   selectedPhotos: string[];
   templateId?: string;
   photostripPath?: string;
+  photosOnlyPath?: string; // diagnostic photos-only composite (no template/footer)
+  finalCompositePath?: string; // always points to the full final composite from backend
   settings: SessionSettings;
   metadata: SessionMetadata;
   createdAt: string;

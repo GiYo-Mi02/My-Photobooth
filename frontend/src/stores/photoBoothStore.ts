@@ -13,6 +13,7 @@ interface PhotoBoothStore extends PhotoBoothState {
   selectMultiplePhotos: (photoIds: string[]) => Promise<void>;
   setTemplate: (template: Template) => void;
   generatePhotostrip: () => Promise<string>;
+  generatePhotostripDual3x2: () => Promise<string>;
   generatePhotostripLandscape: () => Promise<string>;
   generatePhotostripPortrait: () => Promise<string>;
   generatePhotostrip16: () => Promise<string>;
@@ -212,20 +213,64 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         customization: { autoLayout: true } as any,
       } as any);
 
+      const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
       set((state) => ({
         session: state.session ? {
           ...state.session,
-          photostripPath: response.session.photostripPath,
+          photostripPath: displayPath,
+          photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
+          finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
           status: 'completed',
         } : null,
         stage: 'complete',
       }));
 
-      return response.photostrip.url;
+      return displayPath;
     } catch (error) {
       console.error('Failed to generate photostrip:', error);
       throw error;
     }
+  },
+
+  // Dual 3x2 twin-strip layout with footer (autoLayout override)
+  generatePhotostripDual3x2: async (): Promise<string> => {
+    const { session, selectedPhotos, currentTemplate } = get();
+    if (!session) throw new Error('No active session');
+    if (!currentTemplate) throw new Error('No template selected');
+    if (selectedPhotos.length === 0) throw new Error('No photos selected');
+
+    // Up to 12 photos (6 per strip)
+    const photos = selectedPhotos.slice(0, 12);
+    const w = (currentTemplate.dimensions?.width as any) || 1800;
+    const h = (currentTemplate.dimensions?.height as any) || 1200;
+    const footerDate = new Date().toLocaleDateString(undefined, { month: '2-digit', day: '2-digit', year: '2-digit' }).replace(/\//g, '.');
+    const response = await sessionService.generatePhotostrip(session.sessionId, {
+      templateId: currentTemplate._id,
+      selectedPhotoIds: photos.map(p => p._id),
+      targetWidth: w,
+      targetHeight: h,
+      forceOrientation: h >= w ? 'portrait' : 'landscape',
+      layout: 'dual3x2',
+      customization: {
+        autoLayout: true,
+        footer: { hashtag: '#PierceMyHeart', date: footerDate },
+        slotBorderRadius: 36,
+        debug: true,
+      },
+    } as any);
+
+    const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
+    set((state) => ({
+      session: state.session ? {
+        ...state.session,
+        photostripPath: displayPath,
+        photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
+        finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
+        status: 'completed'
+      } : null,
+      stage: 'complete'
+    }));
+    return displayPath;
   },
 
   // Force landscape 1800x1200 regardless of template defaults
@@ -242,15 +287,18 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       forceOrientation: 'landscape',
       customization: { autoLayout: true },
     } as any);
+    const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
     set((state) => ({
       session: state.session ? {
         ...state.session,
-        photostripPath: response.session.photostripPath,
-        status: 'completed',
+        photostripPath: displayPath,
+        photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
+        finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
+        status: 'completed'
       } : null,
-      stage: 'complete',
+      stage: 'complete'
     }));
-    return response.photostrip.url;
+    return displayPath;
   },
 
   // Force portrait 1200x1800 regardless of template defaults
@@ -267,15 +315,18 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       forceOrientation: 'portrait',
       customization: { autoLayout: true },
     } as any);
+    const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
     set((state) => ({
       session: state.session ? {
         ...state.session,
-        photostripPath: response.session.photostripPath,
-        status: 'completed',
+        photostripPath: displayPath,
+        photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
+        finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
+        status: 'completed'
       } : null,
-      stage: 'complete',
+      stage: 'complete'
     }));
-    return response.photostrip.url;
+    return displayPath;
   },
 
   // 16-photo layout: Left 1x4, Right 2x6 on 1800x1200
@@ -294,15 +345,18 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       layout: 'left1x4_right2x6',
       customization: { autoLayout: false, padding: 10 },
     } as any);
+    const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
     set((state) => ({
       session: state.session ? {
         ...state.session,
-        photostripPath: response.session.photostripPath,
-        status: 'completed',
+        photostripPath: displayPath,
+        photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
+        finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
+        status: 'completed'
       } : null,
-      stage: 'complete',
+      stage: 'complete'
     }));
-    return response.photostrip.url;
+    return displayPath;
   },
 
   nextStage: () => {

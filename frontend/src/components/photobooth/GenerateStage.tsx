@@ -4,7 +4,8 @@ import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 import toast from 'react-hot-toast';
 
 const GenerateStage = () => {
-  const { nextStage, previousStage, generatePhotostrip } = usePhotoBoothStore();
+  const { nextStage, previousStage, generatePhotostrip, generatePhotostripDual3x2, selectedPhotos } = usePhotoBoothStore();
+  const [useDual, setUseDual] = useState(true);
   const [isGenerating, setIsGenerating] = useState(true);
 
   const ranRef = useRef(false);
@@ -14,7 +15,11 @@ const GenerateStage = () => {
     let mounted = true;
     (async () => {
       try {
-        await generatePhotostrip();
+        if (useDual && selectedPhotos.length >= 1) {
+          await generatePhotostripDual3x2();
+        } else {
+          await generatePhotostrip();
+        }
         if (mounted) {
           setIsGenerating(false);
           nextStage();
@@ -47,6 +52,14 @@ const GenerateStage = () => {
         <div className="bg-white rounded-lg shadow p-8 mb-8">
           <div className="loading-spinner w-12 h-12 mx-auto mb-4"></div>
           <p className="text-gray-500">Processing your photos...</p>
+          <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-600">
+            <label className="inline-flex items-center gap-1 cursor-pointer select-none">
+              <input type="checkbox" className="accent-primary-500" checked={useDual} onChange={(e)=>setUseDual(e.target.checked)} />
+              <span>Dual 3x2 Layout</span>
+            </label>
+            <span className="opacity-70">•</span>
+            <span>{selectedPhotos.length} selected</span>
+          </div>
         </div>
 
         <div className="flex justify-center space-x-4">

@@ -102,11 +102,16 @@ export const sessionService = {
       url: string;
       template: string;
       photosUsed: number;
+      photosOnlyPath?: string;
+      finalCompositePath?: string;
+      debug?: any;
     };
     session: {
       id: string;
       status: string;
       photostripPath: string;
+      photosOnlyPath?: string;
+      finalCompositePath?: string;
     };
     message: string;
   }> {
@@ -116,11 +121,16 @@ export const sessionService = {
         url: string;
         template: string;
         photosUsed: number;
+        photosOnlyPath?: string;
+        finalCompositePath?: string;
+        debug?: any;
       };
       session: {
         id: string;
         status: string;
         photostripPath: string;
+        photosOnlyPath?: string;
+        finalCompositePath?: string;
       };
       message: string;
   }>(`/sessions/${sessionId}/photostrip`, data);

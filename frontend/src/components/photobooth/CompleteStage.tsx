@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { useState } from 'react';
 import { FiDownload, FiRefreshCw, FiPrinter } from 'react-icons/fi';
 import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 import { apiClient } from '../../lib/api';
@@ -7,6 +8,7 @@ import SharePanel from '../SharePanel';
 
 const CompleteStage = () => {
   const { resetSession, session } = usePhotoBoothStore();
+  const [showFinal, setShowFinal] =  useState(false);
 
   const handleNewSession = () => {
     resetSession();
@@ -105,13 +107,22 @@ const CompleteStage = () => {
         <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
           {session?.photostripPath ? (
             <div className="flex flex-col items-center">
+              <div className="flex items-center gap-3 mb-3">
+                {session.photosOnlyPath && session.finalCompositePath && (
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <input type="checkbox" checked={showFinal} onChange={(e)=>setShowFinal(e.target.checked)} />
+                    <span>{showFinal ? 'Showing Final Composite' : 'Showing Photos Only'}</span>
+                  </label>
+                )}
+              </div>
               <img
-                src={apiClient.getFileUrl(session.photostripPath)}
+                src={apiClient.getFileUrl((showFinal && session.finalCompositePath) ? session.finalCompositePath : session.photostripPath) + `?v=${Date.now()}`}
                 alt="Photostrip"
-                className="max-h-[28rem] w-auto rounded-lg shadow"
+                className="max-h-[28rem] w-auto rounded-lg shadow bg-gray-50"
+                onError={(e)=>{(e.currentTarget as HTMLImageElement).style.opacity='0.3';}}
               />
               <div className="mt-6 w-full max-w-xl">
-                <SharePanel url={apiClient.getFileUrl(session.photostripPath)} />
+                <SharePanel url={apiClient.getFileUrl((showFinal && session.finalCompositePath) ? session.finalCompositePath : session.photostripPath)} />
               </div>
             </div>
           ) : (
