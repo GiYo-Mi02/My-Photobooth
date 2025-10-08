@@ -12,7 +12,6 @@ interface PhotoBoothStore extends PhotoBoothState {
   deselectPhoto: (photoId: string) => void;
   selectMultiplePhotos: (photoIds: string[]) => Promise<void>;
   setTemplate: (template: Template) => void;
-  updatePhotoInterval: (ms: number) => Promise<void>;
   generatePhotostrip: () => Promise<string>;
   generatePhotostripLandscape: () => Promise<string>;
   generatePhotostripPortrait: () => Promise<string>;
@@ -24,6 +23,17 @@ interface PhotoBoothStore extends PhotoBoothState {
   startCapturing: () => void;
   stopCapturing: () => void;
   setCurrentPhotoNumber: (number: number) => void;
+  // Auto capture persistent state & actions
+  autoCapture: {
+    active: boolean;
+    interval: number;      // seconds between shots
+    countdown: number;     // current countdown value
+    inFlight: boolean;     // true while a capture/upload is happening
+  };
+  startAutoCapture: (intervalSeconds: number) => void;
+  stopAutoCapture: () => void;
+  setAutoCountdown: (value: number) => void;
+  setAutoInFlight: (value: boolean) => void;
 }
 
 const initialState: PhotoBoothState = {
@@ -36,28 +46,49 @@ const initialState: PhotoBoothState = {
   stage: 'intro',
 };
 
-export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
+const initialAutoCapture = {
+  active: false,
+  interval: 10,
+  countdown: 0,
+  inFlight: false,
+};
+
+// Wrap original create to intercept stage changes for diagnostics
+export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => {
+  const diagSet: typeof originalSet = (partial, replace) => {
+    const prev = get();
+    const nextPartial = typeof partial === 'function' ? (partial as any)(prev) : partial;
+    if (nextPartial && typeof nextPartial === 'object' && 'stage' in nextPartial && (nextPartial as any).stage !== prev.stage) {
+      // eslint-disable-next-line no-console
+      console.log('[Diag][stage-change]', prev.stage, '->', (nextPartial as any).stage);
+      try { throw new Error('[Diag stack capture]'); } catch (e:any) { console.log(e.stack?.split('\n').slice(0,6).join('\n')); }
+    }
+    return originalSet(partial as any, replace);
+  };
+  const set: typeof originalSet = diagSet;
+  return ({
   ...initialState,
+  autoCapture: initialAutoCapture,
 
   createSession: async () => {
     try {
+      const existing = get().session;
+      if (existing) return; // already have a session
       const response = await sessionService.createSession();
-      set({
+      set((prev) => ({
         session: {
           _id: '',
-          sessionId: response.session.id,
-          status: response.session.status as 'active',
-          totalPhotos: 0,
-          selectedPhotos: [],
-          settings: response.session.settings,
-          metadata: {
-            startTime: response.session.createdAt,
-          },
-          createdAt: response.session.createdAt,
-          updatedAt: response.session.createdAt,
+            sessionId: response.session.id,
+            status: response.session.status as 'active',
+            totalPhotos: 0,
+            selectedPhotos: [],
+            settings: response.session.settings,
+            metadata: { startTime: response.session.createdAt },
+            createdAt: response.session.createdAt,
+            updatedAt: response.session.createdAt,
         },
-        stage: 'capture',
-      });
+        stage: prev.stage === 'intro' ? 'capture' : prev.stage,
+      }));
     } catch (error) {
       console.error('Failed to create session:', error);
       throw error;
@@ -105,28 +136,18 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
         base64Data,
       });
 
-      const updatedSettings = response.session.settings || session.settings;
-      const maxPhotos = updatedSettings?.maxPhotos ?? session.settings?.maxPhotos ?? 10;
-      const nextPhotoNumber = response.session.nextPhotoNumber
-        ? Math.min(maxPhotos + 1, response.session.nextPhotoNumber)
-        : Math.min(maxPhotos + 1, (response.session.totalPhotos || 0) + 1);
-
       set((state) => ({
         photos: [...state.photos, response.photo],
         session: state.session ? {
           ...state.session,
           totalPhotos: response.session.totalPhotos,
           status: response.session.status as 'active' | 'completed' | 'cancelled',
-          settings: {
-            ...state.session.settings,
-            ...(updatedSettings || {}),
-          },
         } : null,
-        currentPhotoNumber: nextPhotoNumber,
+        currentPhotoNumber: Math.min(11, (response.session.totalPhotos || 0) + 1),
       }));
 
-  // Move to review stage if we've taken the maximum allowed photos
-      if (response.session.totalPhotos >= maxPhotos) {
+      // Move to review stage if we've taken 10 photos
+      if (response.session.totalPhotos >= 10) {
         set({ stage: 'review' });
       }
     } catch (error) {
@@ -172,29 +193,6 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     set({ currentTemplate: template });
   },
 
-  updatePhotoInterval: async (ms: number) => {
-    const { session } = get();
-    if (!session) throw new Error('No active session');
-    try {
-      const safeInterval = Math.min(Math.max(ms, 1000), 60000);
-      const response = await sessionService.updateSession(session.sessionId, {
-        settings: { photoInterval: safeInterval },
-      });
-      set((state) => ({
-        session: state.session ? {
-          ...state.session,
-          settings: {
-            ...state.session.settings,
-            ...response.session.settings,
-          },
-        } : null,
-      }));
-    } catch (error) {
-      console.error('Failed to update photo interval:', error);
-      throw error;
-    }
-  },
-
   generatePhotostrip: async (): Promise<string> => {
     const { session, selectedPhotos, currentTemplate } = get();
     
@@ -203,7 +201,6 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     if (selectedPhotos.length === 0) throw new Error('No photos selected');
 
     try {
-      const hasTemplateSlots = (currentTemplate.photoSlots?.length || 0) >= selectedPhotos.length;
       const tw = (currentTemplate.dimensions?.width as any) || (1800 as any);
       const th = (currentTemplate.dimensions?.height as any) || (1200 as any);
       const response = await sessionService.generatePhotostrip(session.sessionId, {
@@ -212,7 +209,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
         targetWidth: tw,
         targetHeight: th,
         forceOrientation: th >= tw ? 'portrait' : 'landscape',
-  customization: (hasTemplateSlots ? { autoLayout: false } : { autoLayout: true, padding: 24, borderRadius: 32 }) as any,
+        customization: { autoLayout: true } as any,
       } as any);
 
       set((state) => ({
@@ -237,14 +234,13 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     if (!session) throw new Error('No active session');
     if (!currentTemplate) throw new Error('No template selected');
     if (selectedPhotos.length === 0) throw new Error('No photos selected');
-    const hasTemplateSlots = (currentTemplate.photoSlots?.length || 0) >= selectedPhotos.length;
     const response = await sessionService.generatePhotostrip(session.sessionId, {
       templateId: currentTemplate._id,
       selectedPhotoIds: selectedPhotos.map(p => p._id),
       targetWidth: 1800,
       targetHeight: 1200,
       forceOrientation: 'landscape',
-  customization: (hasTemplateSlots ? { autoLayout: false } : { autoLayout: true, padding: 24, borderRadius: 32 }) as any,
+      customization: { autoLayout: true },
     } as any);
     set((state) => ({
       session: state.session ? {
@@ -263,14 +259,13 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     if (!session) throw new Error('No active session');
     if (!currentTemplate) throw new Error('No template selected');
     if (selectedPhotos.length === 0) throw new Error('No photos selected');
-    const hasTemplateSlots = (currentTemplate.photoSlots?.length || 0) >= selectedPhotos.length;
     const response = await sessionService.generatePhotostrip(session.sessionId, {
       templateId: currentTemplate._id,
       selectedPhotoIds: selectedPhotos.map(p => p._id),
       targetWidth: 1200,
       targetHeight: 1800,
       forceOrientation: 'portrait',
-  customization: (hasTemplateSlots ? { autoLayout: false } : { autoLayout: true, padding: 24, borderRadius: 32 }) as any,
+      customization: { autoLayout: true },
     } as any);
     set((state) => ({
       session: state.session ? {
@@ -314,9 +309,9 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     const { stage } = get();
     const stages: PhotoBoothState['stage'][] = ['intro', 'capture', 'review', 'template', 'generate', 'complete'];
     const currentIndex = stages.indexOf(stage);
-    
     if (currentIndex < stages.length - 1) {
-      set({ stage: stages[currentIndex + 1] });
+      const next = stages[currentIndex + 1];
+      if (next !== stage) set({ stage: next });
     }
   },
 
@@ -324,18 +319,22 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
     const { stage } = get();
     const stages: PhotoBoothState['stage'][] = ['intro', 'capture', 'review', 'template', 'generate', 'complete'];
     const currentIndex = stages.indexOf(stage);
-    
     if (currentIndex > 0) {
-      set({ stage: stages[currentIndex - 1] });
+      const prevStage = stages[currentIndex - 1];
+      if (prevStage !== stage) set({ stage: prevStage });
     }
   },
 
   setStage: (stage: PhotoBoothState['stage']) => {
-    set({ stage });
+    if (get().stage !== stage) set({ stage });
   },
 
   resetSession: () => {
-    set(initialState);
+    set((prev) => {
+      // Avoid needless rerender if already at initial state (except photos array reference may differ)
+      if (prev.stage === 'intro' && prev.photos.length === 0 && !prev.session) return prev;
+      return { ...initialState, autoCapture: initialAutoCapture };
+    });
   },
 
   startCapturing: () => {
@@ -349,4 +348,32 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((set, get) => ({
   setCurrentPhotoNumber: (number: number) => {
     set({ currentPhotoNumber: number });
   },
-}));
+  startAutoCapture: (intervalSeconds: number) => {
+    const { photos, session } = get();
+    if (!session) return;
+    const maxPhotos = Math.max(1, session.settings?.maxPhotos ?? 10);
+    if (photos.length >= maxPhotos) return;
+    set({
+      autoCapture: {
+        active: true,
+        interval: intervalSeconds,
+        countdown: intervalSeconds,
+        inFlight: false,
+      },
+    });
+  },
+  stopAutoCapture: () => {
+    set({ autoCapture: initialAutoCapture });
+  },
+  setAutoCountdown: (value: number) => {
+    set((state) => ({
+      autoCapture: { ...state.autoCapture, countdown: value },
+    }));
+  },
+  setAutoInFlight: (value: boolean) => {
+    set((state) => ({
+      autoCapture: { ...state.autoCapture, inFlight: value },
+    }));
+  },
+  });
+});

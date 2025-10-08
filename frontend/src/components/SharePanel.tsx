@@ -24,7 +24,7 @@ export const SharePanel: React.FC<Props> = ({ url }) => {
   const handleShare = async () => {
     if (!canWebShare) return;
     try {
-  await (navigator as any).share({ title: 'GPix Photostrip', text: 'Grab my photostrip from GPix', url });
+      await (navigator as any).share({ title: 'GioPix Photostrip', text: 'Grab my photostrip from GioPix', url });
     } catch {}
   };
 

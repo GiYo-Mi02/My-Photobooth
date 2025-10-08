@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { FiCamera, FiPlay } from 'react-icons/fi';
+import { FiPlay } from 'react-icons/fi';
 import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 
 const IntroStage = () => {
@@ -22,7 +22,6 @@ const IntroStage = () => {
         className="text-center max-w-2xl mx-auto px-6"
       >
         <div className="mb-8">
-          <FiCamera className="h-24 w-24 text-primary-600 mx-auto mb-6" />
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
             Welcome to GPix
           </h1>

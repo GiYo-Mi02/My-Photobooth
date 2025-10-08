@@ -62,7 +62,6 @@ export const sessionService = {
     status?: string;
     templateId?: string;
     selectedPhotos?: string[];
-    settings?: Partial<SessionSettings>;
   }): Promise<{
     session: {
       id: string;
@@ -71,7 +70,6 @@ export const sessionService = {
       selectedPhotos: string[];
       template: any;
       photostripPath?: string;
-      settings: SessionSettings;
       metadata: any;
     };
     message: string;
@@ -84,7 +82,6 @@ export const sessionService = {
         selectedPhotos: string[];
         template: any;
         photostripPath?: string;
-        settings: SessionSettings;
         metadata: any;
       };
       message: string;

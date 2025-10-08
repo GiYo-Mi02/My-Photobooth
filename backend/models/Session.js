@@ -45,7 +45,7 @@ const sessionSchema = new mongoose.Schema(
     settings: {
       photoInterval: {
         type: Number,
-        default: 15000, // 15 seconds in milliseconds
+        default: 5000, // 5 seconds in milliseconds
       },
       maxPhotos: {
         type: Number,

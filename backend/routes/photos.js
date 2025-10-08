@@ -56,7 +56,27 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
   try {
     const { sessionId, photoNumber, base64Data } = req.body;
 
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[UPLOAD] incoming body keys:", Object.keys(req.body || {}));
+      if (base64Data) {
+        console.log(
+          "[UPLOAD] base64 length:",
+          base64Data.length,
+          "startsWith(data:image:)",
+          base64Data.startsWith("data:image")
+        );
+      }
+    }
+
     if (!sessionId || !photoNumber) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          "[UPLOAD] Missing required fields. sessionId:",
+          sessionId,
+          "photoNumber:",
+          photoNumber
+        );
+      }
       return res.status(400).json({
         error: "Session ID and photo number are required",
       });
@@ -65,23 +85,14 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
     // Find or create session
     let session = await Session.findOne({ sessionId });
     if (!session) {
-      session = new Session({
-        sessionId,
-        metadata: {
-          userAgent: req.headers["user-agent"],
-          ipAddress: req.ip,
-          startTime: new Date(),
-        },
-      });
+      session = new Session({ sessionId });
       await session.save();
     }
 
     // Enforce max 10 photos per session using atomic increment
     // Attempt to increment; if already at limit, reject
-    const maxPhotosSetting = Number(session.settings?.maxPhotos) || 10;
-
     const updatedSession = await Session.findOneAndUpdate(
-      { _id: session._id, totalPhotos: { $lt: maxPhotosSetting } },
+      { _id: session._id, totalPhotos: { $lt: 10 } },
       { $inc: { totalPhotos: 1 } },
       { new: true }
     );
@@ -100,6 +111,9 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
     if (base64Data) {
       const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
       if (!matches || matches.length !== 3) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[UPLOAD] Invalid base64 header/pattern");
+        }
         return res.status(400).json({ error: "Invalid base64 data" });
       }
 
@@ -126,6 +140,9 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
       fileSize = req.file.size;
       mimeType = req.file.mimetype;
     } else {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[UPLOAD] No base64Data and no file present");
+      }
       return res.status(400).json({
         error: "No photo data provided",
       });
@@ -153,41 +170,14 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
 
     await photo.save();
 
-    let sessionNeedsSave = false;
-    if (!updatedSession.metadata) {
-      updatedSession.metadata = {};
-      sessionNeedsSave = true;
-    }
-    if (!updatedSession.metadata.startTime) {
-      updatedSession.metadata.startTime =
-        session.metadata?.startTime || new Date();
-      sessionNeedsSave = true;
-    }
-
     // Update session status/timestamps if reached 10
     if (updatedSession.totalPhotos >= 10) {
-      const endTime = new Date();
       updatedSession.status = "completed";
-      updatedSession.metadata = {
-        ...updatedSession.metadata,
-        endTime,
-        duration: updatedSession.metadata.startTime
-          ? endTime.getTime() -
-            new Date(updatedSession.metadata.startTime).getTime()
-          : undefined,
-      };
-      sessionNeedsSave = true;
-    }
-
-    if (sessionNeedsSave) {
-      updatedSession.markModified("metadata");
+      updatedSession.metadata.endTime = new Date();
+      updatedSession.metadata.duration =
+        updatedSession.metadata.endTime - updatedSession.metadata.startTime;
       await updatedSession.save();
     }
-
-    const maxPhotos =
-      Number(updatedSession.settings?.maxPhotos) || maxPhotosSetting || 10;
-    const remainingSlots = Math.max(0, maxPhotos - updatedSession.totalPhotos);
-    const nextPhotoNumber = Math.min(maxPhotos, updatedSession.totalPhotos + 1);
 
     res.status(201).json({
       message: "Photo uploaded successfully",
@@ -196,9 +186,6 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
         id: updatedSession.sessionId,
         totalPhotos: updatedSession.totalPhotos,
         status: updatedSession.status,
-        remainingSlots,
-        nextPhotoNumber,
-        settings: updatedSession.settings,
       },
     });
   } catch (error) {

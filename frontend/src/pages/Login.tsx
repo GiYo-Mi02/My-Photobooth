@@ -129,7 +129,7 @@ const Login = () => {
           </div>
 
           <div className="text-center">
-            <Link to="/photobooth" className="text-sm text-primary-600 hover:text-primary-500">Continue as guest to GPix</Link>
+            <Link to="/photobooth" className="text-sm text-primary-600 hover:text-primary-500">Continue as guest to GioPix</Link>
           </div>
         </form>
       </motion.div>

@@ -22,7 +22,7 @@ const CompleteStage = () => {
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-  a.download = 'gpix-photostrip.jpg';
+      a.download = 'giopix-photostrip.jpg';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -57,7 +57,7 @@ const CompleteStage = () => {
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>Print Photostrip - GPix</title>
+          <title>Print Photostrip - GioPix</title>
           <style>
             /* Hint printers for 4x6 inch borderless (landscape). If template is 2000x1600, this remains a close ratio. */
             @page { size: 4in 6in; margin: 0; }

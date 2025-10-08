@@ -1,27 +1,35 @@
 import { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+// Access underlying video element from persistent webcam via DOM query (react-webcam creates a video tag)
+const getVideoEl = () => document.querySelector<HTMLVideoElement>('video');
 import { motion } from 'framer-motion';
-import Webcam from 'react-webcam';
-import { FiCamera, FiPlay, FiPause, FiStopCircle } from 'react-icons/fi';
+import { FiCamera } from 'react-icons/fi';
 import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 import toast from 'react-hot-toast';
 import { apiClient } from '../../lib/api';
+import { useWebcamStore } from '../../stores/webcamStore';
+// formatBytes removed (unused) – can re-import if showing size metrics later
 
 const CaptureStage = () => {
-  const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  // Auto mode toggles: kiosk=1 or auto=1 in query will auto-start the loop
-  const autoMode = params.get('kiosk') === '1' || params.get('auto') === '1';
+  // Global diagnostic counters (attached to window for inspection)
+  const w = window as any;
+  w.__capMounts = (w.__capMounts || 0) + 1;
+  if (w.__capMounts % 5 === 1) {
+    console.log('[Diag] CaptureStage mount count:', w.__capMounts);
+  }
 
-  const webcamRef = useRef<Webcam>(null);
+  // Persistent webcam handled globally (PersistentWebcam component). We access it via the webcam store.
+  const { ready: cameraReady, reliableCapture, capturing, lastCaptureAt, lastResult } = useWebcamStore();
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const previewAnimRef = useRef<number | null>(null);
   const [isCountingDown, setIsCountingDown] = useState(false);
   const [countdown, setCountdown] = useState(5);
-  const [isUpdatingInterval, setIsUpdatingInterval] = useState(false);
+  const [selectedTimer, setSelectedTimer] = useState(5);
   const [showFlash, setShowFlash] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
-  const countdownTimeoutRef = useRef<number | null>(null);
-  const remainingSecondsRef = useRef<number>(0);
+  const timerRef = useRef<number | null>(null);
   const captureLockRef = useRef(false);
+  // Store-driven auto capture persistence
+  const { autoCapture, startAutoCapture, stopAutoCapture, setAutoCountdown, setAutoInFlight } = usePhotoBoothStore();
+  const autoTickTimerRef = useRef<number | null>(null);
 
   const { 
     session,
@@ -29,223 +37,241 @@ const CaptureStage = () => {
     currentPhotoNumber, 
     uploadPhoto, 
     nextStage,
-    isCapturing,
-    startCapturing,
-    stopCapturing,
-    updatePhotoInterval,
+    createSession,
   } = usePhotoBoothStore();
 
-  // Initialize with a static value to avoid TDZ when React evaluates hooks
-  const isCapturingRef = useRef(false);
   const maxPhotos = Math.max(1, session?.settings?.maxPhotos ?? 10);
 
+  // (Removed) videoConstraints now owned by PersistentWebcam.
+
   useEffect(() => {
-    isCapturingRef.current = isCapturing;
-  }, [isCapturing]);
-
-  const capturePhoto = async () => {
-    if (captureLockRef.current) return;
-    if (!webcamRef.current) return;
-    if (photos.length >= maxPhotos) return;
-
-    try {
-      captureLockRef.current = true;
-      setShowFlash(true);
-      const imageSrc = webcamRef.current.getScreenshot();
-      
-      if (imageSrc) {
-        await uploadPhoto(currentPhotoNumber, imageSrc);
-        toast.success(`Photo ${currentPhotoNumber} captured!`);
+    console.log('[Photobooth] CaptureStage mounted');
+    // Live preview animation loop drawing the persistent webcam video into local canvas
+    const animate = () => {
+      const canvas = previewCanvasRef.current;
+      const video = getVideoEl();
+      if (canvas && video && video.readyState >= 2) { // HAVE_CURRENT_DATA
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const vw = video.videoWidth;
+          const vh = video.videoHeight;
+            if (vw && vh) {
+              const cw = canvas.width = canvas.clientWidth;
+              const ch = canvas.height = canvas.clientHeight;
+              const vr = vw / vh;
+              const cr = cw / ch;
+              let dw = cw, dh = ch, dx = 0, dy = 0;
+              if (vr > cr) { // video wider – scale by height
+                dw = ch * vr;
+                dx = (cw - dw) / 2;
+              } else { // video taller – scale by width
+                dh = cw / vr;
+                dy = (ch - dh) / 2;
+              }
+              ctx.drawImage(video, dx, dy, dw, dh);
+            }
+        }
       }
+      previewAnimRef.current = requestAnimationFrame(animate);
+    };
+    previewAnimRef.current = requestAnimationFrame(animate);
+    return () => {
+      console.log('[Photobooth] CaptureStage unmounting');
+      const w = window as any;
+      w.__capUnmounts = (w.__capUnmounts || 0) + 1;
+      if (w.__capUnmounts % 5 === 1) {
+        console.log('[Diag] CaptureStage unmount count:', w.__capUnmounts);
+      }
+      if (previewAnimRef.current) cancelAnimationFrame(previewAnimRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      if (autoTickTimerRef.current) clearTimeout(autoTickTimerRef.current);
+    };
+  }, []);
 
-      setTimeout(() => setShowFlash(false), 300);
-    } catch (error) {
-      console.error('Failed to capture photo:', error);
-      toast.error('Failed to capture photo');
+ const capturePhoto = async () => {
+  if (captureLockRef.current || autoCapture.inFlight) return;
+  if (photos.length >= maxPhotos) return;
+
+  // Ensure a session exists (defensive)
+  if (!session) {
+    console.warn('[Photobooth] No active session – creating one before capture');
+    try {
+      await createSession();
+    } catch (e) {
+      console.error('[Photobooth] Failed to auto-create session', e);
+      return;
     }
-    finally {
-      // small delay to avoid immediate double-fire from rapid events
-      window.setTimeout(() => { captureLockRef.current = false; }, 200);
+  }
+
+  // Wait briefly for camera readiness (up to 1.5s)
+  let readinessWaits = 0;
+  while (!cameraReady && readinessWaits < 10) {
+    await new Promise(r => setTimeout(r, 150));
+    readinessWaits++;
+  }
+  if (!cameraReady) {
+    console.warn('[Photobooth] Capture skipped: camera not ready after retries');
+    return;
+  }
+
+  try {
+    captureLockRef.current = true;
+    setAutoInFlight(true);
+    setShowFlash(true);
+    const dataUrl = await reliableCapture();
+    if (dataUrl) {
+      await uploadPhoto(currentPhotoNumber, dataUrl);
+      toast.success(`Photo ${currentPhotoNumber} captured!`);
+    } else {
+      console.warn('[Photobooth] reliableCapture returned null', lastResult);
+      toast.error('Capture failed');
+      // Single scheduled retry
+      setTimeout(() => { if (!captureLockRef.current) capturePhoto(); }, 900);
     }
-  };
+    setTimeout(() => setShowFlash(false), 240);
+  } catch (error) {
+    console.error('[Photobooth] Failed to capture photo:', error);
+    toast.error('Failed to capture photo');
+  } finally {
+    setTimeout(() => {
+      captureLockRef.current = false;
+      setAutoInFlight(false);
+    }, 400);
+  }
+};
 
-  const MANUAL_COUNTDOWN_SECONDS = 5;
-  const timerOptions = [5000, 10000, 15000];
-  const autoIntervalMs = Math.max(session?.settings?.photoInterval ?? 15000, 1000);
-  const autoCountdownSeconds = Math.max(1, Math.round(autoIntervalMs / 1000));
-
-  const startCountdown = () => {
+  const startTimer = (seconds: number) => {
+    if (captureLockRef.current) return;
+    if (isCountingDown) return;
     if (photos.length >= maxPhotos) {
       nextStage();
       return;
     }
-    if (isCapturing || captureLockRef.current) return;
+    
+    if (!cameraReady) {
+      toast.error('Camera not ready. Please wait for camera to initialize.');
+      return;
+    }
 
+    console.log('[Photobooth] Starting timer:', seconds, 'seconds');
     setIsCountingDown(true);
-    setCountdown(MANUAL_COUNTDOWN_SECONDS);
+    setCountdown(seconds);
 
-    const timer = window.setInterval(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+
+    timerRef.current = window.setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
-          window.clearInterval(timer);
+          clearInterval(timerRef.current!);
+          timerRef.current = null;
           setIsCountingDown(false);
+          console.log('[Photobooth] Timer complete, capturing photo');
           capturePhoto();
-          return MANUAL_COUNTDOWN_SECONDS;
+          return seconds;
         }
         return prev - 1;
       });
     }, 1000);
   };
 
-  const handleManualCapture = () => {
+  const handleInstantCapture = () => {
     if (isCountingDown) return;
     if (captureLockRef.current) return;
     if (photos.length >= maxPhotos) return;
     capturePhoto();
   };
 
-  const clearCountdownTimer = () => {
-    if (countdownTimeoutRef.current) {
-      window.clearTimeout(countdownTimeoutRef.current);
-      countdownTimeoutRef.current = null;
+  const cancelTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
-  };
-
-  const clearAutoTimers = () => {
-    clearCountdownTimer();
-    remainingSecondsRef.current = 0;
-  };
-
-  const runAutoCountdown = async () => {
-    if (!isCapturingRef.current) {
-      clearAutoTimers();
-      return;
-    }
-
-    remainingSecondsRef.current -= 1;
-
-    if (remainingSecondsRef.current <= 0) {
-      clearCountdownTimer();
-      setCountdown(0);
-      setIsCountingDown(false);
-
-      try {
-        await capturePhoto();
-      } catch (error) {
-        console.error('Auto capture failed:', error);
-      }
-
-      if (!isCapturingRef.current) {
-        clearAutoTimers();
-        return;
-      }
-
-      const { photos: updatedPhotos } = usePhotoBoothStore.getState();
-      if (updatedPhotos.length >= maxPhotos) {
-        handleStopAuto();
-        return;
-      }
-
-      scheduleAutoCapture();
-      return;
-    }
-
-    setCountdown(remainingSecondsRef.current);
-    countdownTimeoutRef.current = window.setTimeout(runAutoCountdown, 1000);
-  };
-
-  const scheduleAutoCapture = () => {
-    if (!isCapturingRef.current) return;
-
-    const { photos: currentPhotos } = usePhotoBoothStore.getState();
-    if (currentPhotos.length >= maxPhotos) {
-      handleStopAuto();
-      return;
-    }
-
-    clearAutoTimers();
-
-    remainingSecondsRef.current = autoCountdownSeconds;
-    setIsCountingDown(true);
-    setCountdown(autoCountdownSeconds);
-
-    countdownTimeoutRef.current = window.setTimeout(runAutoCountdown, 1000);
-  };
-
-  const handleTimerChange = async (ms: number) => {
-    if (!session) return;
-    if (session.settings.photoInterval === ms) return;
-    const wasCapturing = isCapturingRef.current;
-    if (wasCapturing) {
-      handleStopAuto();
-    }
-    setIsUpdatingInterval(true);
-    try {
-      await updatePhotoInterval(ms);
-      toast.success(`Auto-capture set to ${Math.round(ms / 1000)} seconds`);
-      clearAutoTimers();
-      setIsCountingDown(false);
-      setCountdown(Math.round(ms / 1000));
-      if (wasCapturing && photos.length < maxPhotos) {
-        window.setTimeout(() => {
-          handleStartAuto();
-        }, 200);
-      }
-    } catch (error) {
-      console.error('Failed to update auto-capture interval:', error);
-      toast.error('Failed to update timer');
-    } finally {
-      setIsUpdatingInterval(false);
-    }
-  };
-
-  const handleStartAuto = () => {
-    if (isCapturing || isCountingDown) return;
-    if (captureLockRef.current) return;
-    clearAutoTimers();
     setIsCountingDown(false);
-    isCapturingRef.current = true; // ensure immediate read reflects capturing
-    startCapturing();
-    scheduleAutoCapture();
-  };
-
-  const handleStopAuto = () => {
-    stopCapturing();
-    isCapturingRef.current = false;
-    clearAutoTimers();
-    setIsCountingDown(false);
+    
+    if (autoCapture.active) stopAutoCapture();
   };
 
   useEffect(() => {
     if (photos.length >= maxPhotos) {
-      // ensure timers are stopped to prevent over-capture
-      clearAutoTimers();
-      setIsCountingDown(false);
-      stopCapturing();
+      cancelTimer();
+      stopAutoCapture();
       setTimeout(() => {
         nextStage();
       }, 600);
     }
-  }, [maxPhotos, nextStage, photos.length, stopCapturing]);
+  }, [maxPhotos, nextStage, photos.length]);
 
+  // Store-driven auto capture effect (gated by camera readiness)
   useEffect(() => {
-    // Cleanup timers on unmount
-    return () => {
-      clearAutoTimers();
-      setIsCountingDown(false);
-      captureLockRef.current = false;
+    if (!autoCapture.active) {
+      if (autoTickTimerRef.current) {
+        clearTimeout(autoTickTimerRef.current);
+        autoTickTimerRef.current = null;
+      }
+      return;
+    }
+    // Mirror store countdown into local overlay state
+    setIsCountingDown(true);
+    setCountdown(autoCapture.countdown);
+    // If camera not ready yet, hold countdown (avoid burning interval time)
+    if (!cameraReady) {
+      // Poll quickly until ready
+      autoTickTimerRef.current = window.setTimeout(() => {
+        setAutoCountdown(autoCapture.countdown); // keep same value
+      }, 300);
+      return () => { if (autoTickTimerRef.current) clearTimeout(autoTickTimerRef.current); };
+    }
+
+    // Stabilization delay: ensure camera has been ready at least 400ms
+    const stableStart = performance.now();
+    const ensureStable = async () => {
+      while (performance.now() - stableStart < 400) {
+        await new Promise(r => setTimeout(r, 80));
+        if (!cameraReady) return false; // aborted
+      }
+      return true;
     };
-  }, []);
 
-  // Auto-start in kiosk/auto mode once the camera stream is ready
-  useEffect(() => {
-    if (!autoMode) return;
-    if (!cameraReady) return;
-    if (isCapturingRef.current) return;
-    if (photos.length >= maxPhotos) return;
-    handleStartAuto();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoMode, cameraReady, maxPhotos, photos.length]);
+    if (autoCapture.countdown <= 0) {
+      (async () => {
+        const stable = await ensureStable();
+        if (!stable) {
+          setAutoCountdown(1); // retry soon
+          return;
+        }
+        if (!autoCapture.inFlight && !captureLockRef.current) {
+          console.log('[Photobooth] Auto countdown hit 0 – capture attempt');
+          await capturePhoto();
+          await new Promise(r => setTimeout(r, 450));
+          const current = usePhotoBoothStore.getState().photos.length;
+          if (current >= maxPhotos) {
+            stopAutoCapture();
+            setTimeout(() => nextStage(), 600);
+            return;
+          }
+          setAutoCountdown(autoCapture.interval);
+        } else {
+          setAutoCountdown(1); // something still in progress, retry shortly
+        }
+      })();
+      return;
+    }
+
+    autoTickTimerRef.current = window.setTimeout(() => {
+      if (!cameraReady) {
+        setAutoCountdown(autoCapture.countdown); // freeze while not ready
+      } else {
+        setAutoCountdown(autoCapture.countdown - 1);
+      }
+    }, 1000);
+    return () => {
+      if (autoTickTimerRef.current) clearTimeout(autoTickTimerRef.current);
+    };
+  }, [autoCapture.active, autoCapture.countdown, autoCapture.interval, autoCapture.inFlight, cameraReady, maxPhotos, nextStage, setAutoCountdown, stopAutoCapture]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
@@ -277,7 +303,7 @@ const CaptureStage = () => {
         </div>
 
         {/* Camera Section */}
-        <div className="relative bg-black rounded-lg overflow-hidden shadow-2xl mb-6">
+  <div className="relative bg-black rounded-lg overflow-hidden shadow-2xl mb-6 w-full max-w-2xl aspect-[4/3] flex items-center justify-center">
           {showFlash && (
             <div className="absolute inset-0 bg-white z-20 flash-animation" />
           )}
@@ -296,93 +322,90 @@ const CaptureStage = () => {
             </div>
           )}
 
-          <Webcam
-            ref={webcamRef}
-            audio={false}
-            screenshotFormat="image/jpeg"
-            screenshotQuality={0.92}
-            videoConstraints={{
-              width: 640,
-              height: 480,
-              facingMode: 'user'
-            }}
-            onUserMedia={() => setCameraReady(true)}
-            onUserMediaError={() => setCameraReady(false)}
-            className="w-full h-auto"
-          />
+          <canvas ref={previewCanvasRef} className="absolute inset-0 w-full h-full object-cover" />
+          {!cameraReady && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white/80 text-sm">Initializing camera...</div>
+          )}
+          <div className="absolute top-2 left-2 flex flex-col gap-1 z-30">
+            <span className={`px-2 py-1 rounded text-xs font-semibold ${cameraReady ? 'bg-emerald-600/80 text-white' : 'bg-yellow-600/80 text-white'}`}>{cameraReady ? 'Ready' : 'Init'}</span>
+            {capturing && <span className="px-2 py-1 rounded text-xs bg-blue-600/80 text-white animate-pulse">Capturing</span>}
+            {lastResult && !lastResult.success && <span className="px-2 py-1 rounded text-xs bg-red-600/80 text-white">Retrying…</span>}
+          </div>
+          {autoCapture.active && (
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+              <div className="h-full bg-primary-400 transition-all" style={{ width: `${(autoCapture.countdown / autoCapture.interval) * 100}%` }} />
+            </div>
+          )}
         </div>
 
         {/* Controls */}
-        <div className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <span className="font-medium text-gray-700">Auto Timer:</span>
-            {timerOptions.map((option) => {
-              const seconds = Math.round(option / 1000);
-              const isActive = autoIntervalMs === option;
-              return (
-                <button
-                  key={option}
-                  onClick={() => handleTimerChange(option)}
-                  disabled={isUpdatingInterval || captureLockRef.current}
-                  className={`px-3 py-2 rounded-full border transition-colors ${
-                    isActive
-                      ? 'bg-primary-500 text-white border-primary-500 shadow'
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
-                  } ${isUpdatingInterval ? 'opacity-70 cursor-wait' : ''}`}
-                >
-                  {seconds}s
-                </button>
-              );
-            })}
-          </div>
-
+        <div className="flex flex-col items-center space-y-4">
           {photos.length < maxPhotos && (
             <>
-              <button
-                onClick={startCountdown}
-                disabled={isCountingDown || isCapturing || captureLockRef.current}
-                className="btn-primary inline-flex items-center justify-center"
-              >
-                {isCountingDown ? (
-                  <>
-                    <FiPause className="mr-2 h-5 w-5" />
-                    Capturing in {countdown}...
-                  </>
-                ) : (
-                  <>
-                    <FiPlay className="mr-2 h-5 w-5" />
-                    Start {MANUAL_COUNTDOWN_SECONDS}s Timer
-                  </>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <span className="font-medium text-gray-700">Manual Timer: </span>
+                {[5, 10, 15].map((seconds) => (
+                  <button
+                    key={seconds}
+                    onClick={() => {
+                      setSelectedTimer(seconds);
+                      startTimer(seconds);
+                    }}
+                    disabled={isCountingDown || captureLockRef.current}
+                    className={`px-4 py-2 rounded-full border transition-colors ${
+                      selectedTimer === seconds && !isCountingDown
+                        ? 'bg-primary-500 text-white border-primary-500 shadow'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                    } ${isCountingDown || captureLockRef.current ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    {seconds}s
+                  </button>
+                ))}
+
+                <div className="flex items-center gap-2">
+                  {!autoCapture.active ? (
+                    <button
+                      onClick={() => startAutoCapture(selectedTimer)}
+                      disabled={captureLockRef.current}
+                      className="px-5 py-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition whitespace-nowrap"
+                    >
+                      Auto ({selectedTimer}s)
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopAutoCapture}
+                      className="px-5 py-2 rounded-full bg-red-600 text-white hover:bg-red-700 transition"
+                    >
+                      Stop Auto
+                    </button>
+                  )}
+                  {autoCapture.active && (
+                    <div className="flex items-center gap-1 text-xs text-gray-600">
+                      <span className="px-2 py-1 bg-gray-200 rounded-full">Interval {autoCapture.interval}s</span>
+                      <span className="px-2 py-1 bg-gray-200 rounded-full">T-{autoCapture.countdown}s</span>
+                      {autoCapture.inFlight && <span className="px-2 py-1 bg-blue-200 text-blue-700 rounded-full">Uploading…</span>}
+                    </div>
+                  )}
+                </div>
+                
+                {isCountingDown && (
+                  <button
+                    onClick={cancelTimer}
+                    className="px-4 py-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
+                  >
+                    Cancel
+                  </button>
                 )}
-              </button>
+              </div>
 
               <button
-                onClick={handleManualCapture}
-                disabled={isCountingDown || isCapturing || captureLockRef.current}
-                className="btn-secondary inline-flex items-center justify-center"
+                onClick={handleInstantCapture}
+                disabled={isCountingDown || captureLockRef.current || capturing}
+                className="btn-primary inline-flex items-center justify-center disabled:opacity-60"
               >
                 <FiCamera className="mr-2 h-5 w-5" />
-                Capture Now
+                {capturing ? 'Capturing...' : 'Capture Now'}
               </button>
-
-              {!isCapturing ? (
-                <button
-                  onClick={handleStartAuto}
-                  disabled={isCountingDown || captureLockRef.current}
-                  className="btn-ghost inline-flex items-center justify-center"
-                >
-                  <FiPlay className="mr-2 h-5 w-5" />
-                  Auto-capture (every {autoCountdownSeconds}s)
-                </button>
-              ) : (
-                <button
-                  onClick={handleStopAuto}
-                  className="btn-ghost inline-flex items-center justify-center"
-                >
-                  <FiStopCircle className="mr-2 h-5 w-5" />
-                  Stop Auto-capture
-                </button>
-              )}
             </>
           )}
 
@@ -412,6 +435,13 @@ const CaptureStage = () => {
                   />
                 </div>
               ))}
+            </div>
+            <div className="mt-4 text-center text-xs text-gray-500">
+              {lastResult && (
+                <span>
+                  Last: {lastResult.success ? 'OK' : 'Fail'} • attempts {lastResult.attempts} • {lastResult.durationMs.toFixed(0)}ms{lastResult.reason ? ` • ${lastResult.reason}` : ''}{lastCaptureAt ? ` • ${new Date(lastCaptureAt).toLocaleTimeString()}` : ''}
+                </span>
+              )}
             </div>
           </div>
         )}
