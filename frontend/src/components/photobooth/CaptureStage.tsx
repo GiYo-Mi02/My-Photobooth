@@ -303,40 +303,40 @@ const CaptureStage = () => {
         </div>
 
         {/* Camera Section */}
-  <div className="relative bg-black rounded-lg overflow-hidden shadow-2xl mb-6 w-full max-w-2xl aspect-[4/3] flex items-center justify-center">
-          {showFlash && (
-            <div className="absolute inset-0 bg-white z-20 flash-animation" />
-          )}
-          
-          {isCountingDown && (
-            <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/50">
-              <motion.div
-                key={countdown}
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                exit={{ scale: 0 }}
-                className="countdown-number"
-              >
-                {countdown}
-              </motion.div>
-            </div>
-          )}
+  <div className="relative bg-black rounded-lg overflow-hidden shadow-2xl mb-6 w-full max-w-2xl aspect-[4/3] flex items-center justify-center mx-auto">
+    {showFlash && (
+      <div className="absolute inset-0 bg-white z-20 flash-animation" />
+    )}
+    
+    {isCountingDown && (
+      <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/50">
+        <motion.div
+    key={countdown}
+    initial={{ scale: 0 }}
+    animate={{ scale: 1 }}
+    exit={{ scale: 0 }}
+    className="countdown-number"
+        >
+    {countdown}
+        </motion.div>
+      </div>
+    )}
 
-          <canvas ref={previewCanvasRef} className="absolute inset-0 w-full h-full object-cover" />
-          {!cameraReady && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white/80 text-sm">Initializing camera...</div>
-          )}
-          <div className="absolute top-2 left-2 flex flex-col gap-1 z-30">
-            <span className={`px-2 py-1 rounded text-xs font-semibold ${cameraReady ? 'bg-emerald-600/80 text-white' : 'bg-yellow-600/80 text-white'}`}>{cameraReady ? 'Ready' : 'Init'}</span>
-            {capturing && <span className="px-2 py-1 rounded text-xs bg-blue-600/80 text-white animate-pulse">Capturing</span>}
-            {lastResult && !lastResult.success && <span className="px-2 py-1 rounded text-xs bg-red-600/80 text-white">Retrying…</span>}
-          </div>
-          {autoCapture.active && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
-              <div className="h-full bg-primary-400 transition-all" style={{ width: `${(autoCapture.countdown / autoCapture.interval) * 100}%` }} />
-            </div>
-          )}
-        </div>
+    <canvas ref={previewCanvasRef} className="absolute inset-0 w-full h-full object-cover" />
+    {!cameraReady && (
+      <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white/80 text-sm">Initializing camera...</div>
+    )}
+    <div className="absolute top-2 left-2 flex flex-col gap-1 z-30">
+      <span className={`px-2 py-1 rounded text-xs font-semibold ${cameraReady ? 'bg-emerald-600/80 text-white' : 'bg-yellow-600/80 text-white'}`}>{cameraReady ? 'Ready' : 'Init'}</span>
+      {capturing && <span className="px-2 py-1 rounded text-xs bg-blue-600/80 text-white animate-pulse">Capturing</span>}
+      {lastResult && !lastResult.success && <span className="px-2 py-1 rounded text-xs bg-red-600/80 text-white">Retrying…</span>}
+    </div>
+    {autoCapture.active && (
+      <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+        <div className="h-full bg-primary-400 transition-all" style={{ width: `${(autoCapture.countdown / autoCapture.interval) * 100}%` }} />
+      </div>
+    )}
+  </div>
 
         {/* Controls */}
         <div className="flex flex-col items-center space-y-4">
