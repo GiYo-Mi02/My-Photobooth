@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 // Access underlying video element from persistent webcam via DOM query (react-webcam creates a video tag)
 const getVideoEl = () => document.querySelector<HTMLVideoElement>('video');
 import { motion } from 'framer-motion';
-import { FiCamera } from 'react-icons/fi';
+import { FiCamera, FiMaximize, FiMinimize } from 'react-icons/fi';
 import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 import toast from 'react-hot-toast';
 import { apiClient } from '../../lib/api';
@@ -20,10 +20,15 @@ const CaptureStage = () => {
   // Persistent webcam handled globally (PersistentWebcam component). We access it via the webcam store.
   const { ready: cameraReady, reliableCapture, capturing, lastCaptureAt, lastResult } = useWebcamStore();
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fullWrapRef = useRef<HTMLDivElement | null>(null);
   const previewAnimRef = useRef<number | null>(null);
   const [isCountingDown, setIsCountingDown] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [selectedTimer, setSelectedTimer] = useState(5);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(true);
+  const [showUi, setShowUi] = useState(true);
+  const idleTimerRef = useRef<number | null>(null);
   const [showFlash, setShowFlash] = useState(false);
   const timerRef = useRef<number | null>(null);
   const captureLockRef = useRef(false);
@@ -87,8 +92,55 @@ const CaptureStage = () => {
         clearInterval(timerRef.current);
       }
       if (autoTickTimerRef.current) clearTimeout(autoTickTimerRef.current);
+      // Attempt to exit fullscreen if this component unmounts while active
+      try { if (document.fullscreenElement) document.exitFullscreen(); } catch {}
     };
   }, []);
+
+  // Sync fullscreen state with browser events
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
+  // Auto-hide overlays while fullscreen when idle
+  useEffect(() => {
+    if (!isFullscreen) {
+      setShowUi(true);
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      return;
+    }
+    // When entering fullscreen, show controls briefly then hide after delay
+    setShowUi(true);
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => setShowUi(false), 2000);
+    // cleanup on unmount or fullscreen exit handled above
+  }, [isFullscreen]);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await fullWrapRef.current?.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (e) {
+      console.warn('[Photobooth] Fullscreen toggle failed', e);
+    }
+  };
+
+  const toggleTray = () => setTrayOpen((v) => !v);
+
+  const handleUserActivity = () => {
+    if (!isFullscreen) return;
+    setShowUi(true);
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => setShowUi(false), 2000);
+  };
 
  const capturePhoto = async () => {
   if (captureLockRef.current || autoCapture.inFlight) return;
@@ -302,8 +354,19 @@ const CaptureStage = () => {
           </div>
         </div>
 
-        {/* Camera Section */}
-  <div className="relative bg-black rounded-lg overflow-hidden shadow-2xl mb-6 w-full max-w-2xl aspect-[4/3] flex items-center justify-center mx-auto">
+        {/* Camera + Controls Wrapper (Fullscreen target) */}
+        <div
+          ref={fullWrapRef}
+          className={isFullscreen ? 'fixed inset-0 z-[1000] flex flex-col bg-black' : ''}
+          onMouseMove={handleUserActivity}
+          onTouchStart={handleUserActivity}
+        >
+  {/* Camera Section */}
+  <div className={
+    isFullscreen
+      ? 'relative bg-black overflow-hidden w-full flex-1 flex items-center justify-center m-0 rounded-none'
+      : 'relative bg-black rounded-lg overflow-hidden shadow-2xl mb-6 w-full max-w-2xl aspect-[4/3] flex items-center justify-center mx-auto'
+  }>
     {showFlash && (
       <div className="absolute inset-0 bg-white z-20 flash-animation" />
     )}
@@ -326,11 +389,21 @@ const CaptureStage = () => {
     {!cameraReady && (
       <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white/80 text-sm">Initializing camera...</div>
     )}
-    <div className="absolute top-2 left-2 flex flex-col gap-1 z-30">
+    <div className={`absolute top-2 left-2 flex flex-col gap-1 z-30 transition-opacity duration-200 ${isFullscreen ? (showUi ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none') : ''}`}>
       <span className={`px-2 py-1 rounded text-xs font-semibold ${cameraReady ? 'bg-emerald-600/80 text-white' : 'bg-yellow-600/80 text-white'}`}>{cameraReady ? 'Ready' : 'Init'}</span>
       {capturing && <span className="px-2 py-1 rounded text-xs bg-blue-600/80 text-white animate-pulse">Capturing</span>}
       {lastResult && !lastResult.success && <span className="px-2 py-1 rounded text-xs bg-red-600/80 text-white">Retrying…</span>}
     </div>
+    {/* Fullscreen toggle */}
+    <button
+      type="button"
+      onClick={toggleFullscreen}
+      className={`absolute top-2 right-2 z-30 inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/80 hover:bg-white text-gray-800 text-xs shadow transition-opacity duration-200 ${isFullscreen ? (showUi ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none') : ''}`}
+      title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+    >
+      {isFullscreen ? <FiMinimize /> : <FiMaximize />}
+      <span>{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
+    </button>
     {autoCapture.active && (
       <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
         <div className="h-full bg-primary-400 transition-all" style={{ width: `${(autoCapture.countdown / autoCapture.interval) * 100}%` }} />
@@ -338,8 +411,8 @@ const CaptureStage = () => {
     )}
   </div>
 
-        {/* Controls */}
-        <div className="flex flex-col items-center space-y-4">
+    {/* Controls (remain visible in fullscreen) */}
+  <div className={(isFullscreen ? 'flex flex-col items-center space-y-4 px-4 pb-6 pt-4 bg-black/40 ' : 'flex flex-col items-center space-y-4 ') + (isFullscreen ? (showUi ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none') : '') + ' transition-opacity duration-200'}>
           {photos.length < maxPhotos && (
             <>
               <div className="flex flex-wrap items-center justify-center gap-2">
@@ -419,7 +492,67 @@ const CaptureStage = () => {
           )}
         </div>
 
-        {/* Photo Thumbnails */}
+        {/* Collapsible tray (only in fullscreen) */}
+        {isFullscreen && (
+          <div
+            className={
+              'pointer-events-auto fixed top-0 right-0 h-full z-[1001] transition-transform duration-300 ' +
+              (trayOpen ? 'translate-x-0' : 'translate-x-full')
+            }
+            style={{ width: 'min(32rem, 40vw)' }}
+            aria-hidden={!trayOpen}
+          >
+            {/* Tray panel */}
+            <div className="h-full w-full bg-white/95 backdrop-blur border-l border-gray-200 shadow-xl flex flex-col">
+              <div className={`p-4 border-b border-gray-200 flex items-center justify-between transition-opacity duration-200 ${showUi ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                onMouseMove={handleUserActivity}
+              >
+                <h3 className="text-sm font-semibold text-gray-800">Captured Photos ({photos.length}/{maxPhotos})</h3>
+                <button
+                  onClick={toggleTray}
+                  className="px-2 py-1 rounded text-xs bg-gray-100 hover:bg-gray-200 text-gray-700"
+                  aria-label={trayOpen ? 'Hide tray' : 'Show tray'}
+                >
+                  {trayOpen ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <div className="p-3 overflow-auto">
+                {photos.length > 0 ? (
+                  <div className="grid grid-cols-3 gap-2">
+                    {photos.map((photo) => (
+                      <div key={photo._id} className="aspect-square">
+                        <img
+                          src={apiClient.getFileUrl(photo.path)}
+                          alt={`Photo ${photo.photoNumber}`}
+                          className="w-full h-full object-cover rounded border border-gray-300"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500">No photos yet.</div>
+                )}
+              </div>
+            </div>
+            {/* Tray handle */}
+            <button
+              type="button"
+              onClick={toggleTray}
+              className={
+                'absolute top-1/2 -left-10 -translate-y-1/2 px-3 py-2 rounded-l-md shadow text-sm font-medium transition-colors ' +
+                (trayOpen ? 'bg-white text-gray-800 hover:bg-gray-100' : 'bg-white/80 text-gray-800 hover:bg-white') + ' ' +
+                (showUi ? 'opacity-100' : 'opacity-0 pointer-events-none') + ' transition-opacity duration-200'
+              }
+              aria-label={trayOpen ? 'Collapse panel' : 'Expand panel'}
+            >
+              {trayOpen ? '→' : '←'}
+            </button>
+          </div>
+        )}
+
+        </div>{/* End Fullscreen Wrapper */}
+
+        {/* Photo Thumbnails (hidden while fullscreen, since wrapper is in fullscreen mode) */}
         {photos.length > 0 && (
           <div className="mt-8">
             <h3 className="text-lg font-semibold text-gray-900 mb-4 text-center">

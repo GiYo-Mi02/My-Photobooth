@@ -56,6 +56,18 @@ const Templates = () => {
   // Track whether the visual editor has been initialized from initial slots to avoid feedback resets
   const [visualInit, setVisualInit] = useState(false);
 
+  // Edit modal state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editing, setEditing] = useState<Template | null>(null);
+  const [editImageFile, setEditImageFile] = useState<File | null>(null);
+  const [editSlotsPx, setEditSlotsPx] = useState<PhotoSlot[]>([]);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editCategory, setEditCategory] = useState('classic');
+  const [editIsDefault, setEditIsDefault] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editLoadingImg, setEditLoadingImg] = useState(false);
+
   // Reset visual init when file or mode changes
   useEffect(() => {
     setVisualInit(false);
@@ -187,6 +199,62 @@ const Templates = () => {
       await loadTemplates();
     } catch (e: any) {
       toast.error(e?.message || 'Delete failed');
+    }
+  };
+
+  const openEdit = async (t: Template) => {
+    setEditing(t);
+    setEditOpen(true);
+    setEditName(t.name);
+    setEditDescription(t.description || '');
+    setEditCategory(t.category || 'classic');
+    setEditIsDefault(!!t.isDefault);
+    setEditSlotsPx(t.photoSlots || []);
+    setEditImageFile(null);
+    try {
+      setEditLoadingImg(true);
+      const url = apiClient.getFileUrl(t.path);
+      const resp = await fetch(url, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`Failed to load image (${resp.status})`);
+      const blob = await resp.blob();
+      const extFromPath = (t.path.split('.').pop() || 'jpg').toLowerCase();
+      const filename = t.originalName || `template-${t._id}.${extFromPath}`;
+      const file = new File([blob], filename, { type: blob.type || 'image/jpeg' });
+      setEditImageFile(file);
+    } catch (e: any) {
+      console.error('Edit image load error:', e);
+      toast.error('Could not load template image for editing');
+    } finally {
+      setEditLoadingImg(false);
+    }
+  };
+
+  const closeEdit = () => {
+    setEditOpen(false);
+    setEditing(null);
+    setEditImageFile(null);
+    setEditSlotsPx([]);
+    setEditSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    try {
+      setEditSaving(true);
+      await templateService.updateTemplate(editing._id, {
+        name: editName.trim(),
+        description: editDescription.trim() || undefined,
+        category: editCategory,
+        photoSlots: editSlotsPx,
+        isDefault: editIsDefault,
+      });
+      toast.success('Template updated');
+      closeEdit();
+      await loadTemplates();
+    } catch (e: any) {
+      toast.error(e?.message || 'Update failed');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -323,7 +391,10 @@ const Templates = () => {
                       <div className="text-sm text-gray-500 truncate">{t.category}</div>
                       <div className="flex items-center justify-between mt-3">
                         <div className="text-xs text-gray-500">{t.photoSlots.length} slots</div>
-                        <button onClick={() => handleDelete(t._id)} className="text-red-600 text-sm hover:underline">Delete</button>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => openEdit(t)} className="text-primary-700 text-sm hover:underline">Edit</button>
+                          <button onClick={() => handleDelete(t._id)} className="text-red-600 text-sm hover:underline">Delete</button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -333,6 +404,66 @@ const Templates = () => {
           </div>
         </div>
       </div>
+
+      {/* Edit Modal */}
+      {editOpen && editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={closeEdit} />
+          <div className="relative bg-white w-full max-w-5xl max-h-[90vh] rounded-lg shadow-lg overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-lg font-semibold">Edit Template</h3>
+              <button onClick={closeEdit} className="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 overflow-auto">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input value={editName} onChange={(e) => setEditName(e.target.value)} className="input w-full" />
+                <label className="block text-sm font-medium text-gray-700 mb-1 mt-3">Description</label>
+                <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} className="input w-full min-h-[80px]" />
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                    <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} className="input w-full">
+                      <option value="classic">classic</option>
+                      <option value="modern">modern</option>
+                      <option value="fun">fun</option>
+                      <option value="elegant">elegant</option>
+                      <option value="holiday">holiday</option>
+                      <option value="custom">custom</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <label className="inline-flex items-center space-x-2">
+                      <input type="checkbox" checked={editIsDefault} onChange={(e) => setEditIsDefault(e.target.checked)} />
+                      <span>Set as default</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Photo Slots</label>
+                {editLoadingImg && (
+                  <div className="p-3 text-sm text-gray-500 bg-gray-50 rounded border">Loading image...</div>
+                )}
+                {!editLoadingImg && !editImageFile && (
+                  <div className="p-3 text-sm text-red-600 bg-red-50 rounded border">Failed to load template image. You can still edit metadata.</div>
+                )}
+                {editImageFile && (
+                  <TemplateSlotEditor
+                    imageFile={editImageFile}
+                    initialSlots={editing.photoSlots}
+                    onChange={(px) => setEditSlotsPx(px)}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 p-4 border-t">
+              <button onClick={closeEdit} className="btn-ghost">Cancel</button>
+              <button onClick={saveEdit} disabled={editSaving} className="btn-primary">{editSaving ? 'Saving…' : 'Save changes'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
