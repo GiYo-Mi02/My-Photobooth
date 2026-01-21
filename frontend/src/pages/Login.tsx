@@ -32,7 +32,9 @@ const Login = () => {
       toast.success('Login successful!');
       navigate('/');
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Login failed');
+      const errorMsg = error.response?.data?.error || error.response?.data?.details?.[0]?.msg || 'Login failed';
+      console.error('Login error:', error.response?.data);
+      toast.error(errorMsg);
     } finally {
       setIsLoading(false);
     }

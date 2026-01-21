@@ -66,27 +66,42 @@ router.post(
 // Login
 router.post(
   "/login",
-  [body("email").isEmail().normalizeEmail(), body("password").exists()],
+  [
+    body("email").trim().notEmpty().withMessage("Email is required"),
+    body("password").notEmpty().withMessage("Password is required")
+  ],
   async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
+        console.log("❌ Validation errors:", errors.array());
+        console.log("📨 Request body:", req.body);
+        return res.status(400).json({ 
+          error: "Validation failed",
+          details: errors.array() 
+        });
       }
 
       const { email, password } = req.body;
+      console.log("🔐 Login attempt for email:", email);
 
       // Find user by email
       const user = await User.findOne({ email, isActive: true });
       if (!user) {
+        console.log("❌ User not found or inactive:", email);
         return res.status(401).json({ error: "Invalid credentials" });
       }
+
+      console.log("✅ User found:", user.email, "| Role:", user.role);
 
       // Check password
       const isMatch = await user.comparePassword(password);
       if (!isMatch) {
+        console.log("❌ Password mismatch for:", email);
         return res.status(401).json({ error: "Invalid credentials" });
       }
+
+      console.log("✅ Login successful for:", email);
 
       // Generate JWT token
       const token = jwt.sign(
@@ -101,7 +116,7 @@ router.post(
         user,
       });
     } catch (error) {
-      console.error("Login error:", error);
+      console.error("❌ Login error:", error);
       res.status(500).json({ error: "Server error during login" });
     }
   }
