@@ -1357,9 +1357,14 @@ router.post("/:sessionId/photostrip", async (req, res) => {
           Math.round(dateText.length * dateFontSize * 0.78) +
             Math.round(dateFontSize * 1.4)
         );
-        const textHeight = Math.round(dateFontSize * 1.35);
-        const baselineY = Math.round(dateFontSize * 0.98);
-        const dateTextSvg = `<svg width="${textWidth}" height="${textHeight}" xmlns="http://www.w3.org/2000/svg"><text x="0" y="${baselineY}" font-family="Caveat, Segoe Script, Brush Script MT, cursive" font-size="${dateFontSize}" fill="#000000" fill-opacity="0.58" letter-spacing="0.3">${escapeXml(
+        const textHeight = Math.round(dateFontSize * 1.6);
+        const baselineY = Math.round(dateFontSize * 1.08);
+        const dateTextSvg = `<svg width="${textWidth}" height="${textHeight}" xmlns="http://www.w3.org/2000/svg"><text x="0" y="${baselineY}" font-family="Caveat, Segoe Script, Brush Script MT, cursive" font-size="${dateFontSize}" fill="none" stroke="#ffffff" stroke-opacity="0.72" stroke-width="${Math.max(
+          1.6,
+          dateFontSize * 0.14
+        )}" stroke-linejoin="round" letter-spacing="0.3">${escapeXml(
+          dateText
+        )}</text><text x="0" y="${baselineY}" font-family="Caveat, Segoe Script, Brush Script MT, cursive" font-size="${dateFontSize}" fill="#111111" fill-opacity="0.82" letter-spacing="0.3">${escapeXml(
           dateText
         )}</text></svg>`;
 
