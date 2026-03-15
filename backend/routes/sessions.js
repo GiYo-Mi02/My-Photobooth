@@ -11,6 +11,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import sharp from "sharp";
+import QRCode from "qrcode";
+
+import mongoose from "mongoose";
+import { isCloudinaryConfigured, uploadImageBuffer } from "../lib/cloudinary.js";
 
 // Simple XML escape for dynamic footer text
 const escapeXml = (str = "") =>
@@ -38,6 +42,57 @@ const DEFAULT_HEIGHT = 1200;
 
 const clampNumber = (value, min, max) =>
   Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+
+const isHttpUrl = (value = "") => /^https?:\/\//i.test(String(value));
+
+const trimTrailingSlashes = (value = "") => String(value).replace(/\/+$/, "");
+
+const cleanEnvValue = (value = "") =>
+  String(value).trim().replace(/^['\"]|['\"]$/g, "");
+
+const buildCloudinaryImageUrl = (publicId, format = "jpg") => {
+  const cloudName = cleanEnvValue(process.env.CLOUDINARY_CLOUD_NAME);
+  if (!cloudName || cloudName === "your_cloud_name_here") return null;
+  return `https://res.cloudinary.com/${cloudName}/image/upload/${publicId}.${format}`;
+};
+
+const resolvePublicBaseUrl = (req) => {
+  const envBase = trimTrailingSlashes(process.env.PUBLIC_BASE_URL || "");
+  const isPlaceholder = /your-public-ip-or-domain|example\.com/i.test(envBase);
+  if (envBase && !isPlaceholder) {
+    return envBase;
+  }
+  return `${req.protocol}://${req.get("host")}`;
+};
+
+const loadPhotoInput = async (photoDoc) => {
+  const rawPath = photoDoc?.path;
+  if (!rawPath) {
+    throw new Error(`Photo ${photoDoc?._id} is missing file path information`);
+  }
+
+  if (isHttpUrl(rawPath)) {
+    const resp = await fetch(rawPath);
+    if (!resp.ok) {
+      throw new Error(`Failed to fetch remote photo (${resp.status})`);
+    }
+    const arrayBuf = await resp.arrayBuffer();
+    return {
+      input: Buffer.from(arrayBuf),
+      debugRef: rawPath,
+      size: Number(resp.headers.get("content-length")) || undefined,
+    };
+  }
+
+  const photoPath = String(rawPath).replace(/^[/\\]+/, "");
+  const absolutePhotoPath = path.join(__dirname, "..", "..", photoPath);
+  const st = await fs.stat(absolutePhotoPath);
+  return {
+    input: absolutePhotoPath,
+    debugRef: absolutePhotoPath,
+    size: st.size,
+  };
+};
 
 const createRoundedMaskSvg = (width, height, radius) =>
   `<svg width="${width}" height="${height}"><rect x="0" y="0" width="${width}" height="${height}" rx="${radius}" ry="${radius}"/></svg>`;
@@ -455,6 +510,9 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       (customization.debug === true ||
         (process.env.NODE_ENV === "development" &&
           customization.debug !== false));
+    const photoFilterMode = String(
+      customization.photoFilter || customization.overlayFilter || "none"
+    ).toLowerCase();
     if (debugMode) {
       console.log(
         "[PHOTOSTRIP][DEBUG] Request layout=%s selected=%d output=%dx%d templateSlots=%d autoLayout=%s",
@@ -499,28 +557,24 @@ router.post("/:sessionId/photostrip", async (req, res) => {
 
       if (!photo) continue;
 
-      const photoPath = photo.path?.replace(/^[/\\]+/, "");
-      if (!photoPath) {
-        throw new Error(`Photo ${photoId} is missing file path information`);
-      }
-
-      const absolutePhotoPath = path.join(__dirname, "..", "..", photoPath);
+      const loadedPhoto = await loadPhotoInput(photo);
+      const photoInput = loadedPhoto.input;
+      const photoDebugRef = loadedPhoto.debugRef;
 
       // Debug: log file stats
       if (debugMode) {
         try {
-          const st = await fs.stat(absolutePhotoPath);
           console.log(
             "[PHOTOSTRIP][DEBUG] Photo file %s %s %dB",
             photoId,
-            absolutePhotoPath,
-            st.size
+            photoDebugRef,
+            loadedPhoto.size || 0
           );
         } catch (e) {
           console.log(
             "[PHOTOSTRIP][DEBUG] Photo stat failed %s %s %s",
             photoId,
-            absolutePhotoPath,
+            photoDebugRef,
             e.message
           );
         }
@@ -529,7 +583,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       // Sample average luminance to auto-correct dark images
       let avgLuma = null;
       try {
-        const tiny = await sharp(absolutePhotoPath)
+        const tiny = await sharp(photoInput)
           .resize(8, 8, { fit: "cover" })
           .removeAlpha()
           .raw()
@@ -577,7 +631,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
             const firstId = selectedPhotoIds[0];
             const doc = await Photo.findById(firstId);
             if (doc) {
-              const abs = path.join(PHOTO_UPLOAD_DIR, doc.filename);
+              const loadedFirst = await loadPhotoInput(doc);
               const testResizeW = Math.min(
                 outputWidth,
                 Math.round(outputWidth / 2)
@@ -586,7 +640,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
                 outputHeight,
                 Math.round(outputHeight / 2)
               );
-              const rawBuf = await sharp(abs)
+              const rawBuf = await sharp(loadedFirst.input)
                 .resize({
                   width: testResizeW,
                   height: testResizeH,
@@ -616,7 +670,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
         }
       }
 
-      let pipeline = sharp(absolutePhotoPath);
+      let pipeline = sharp(photoInput);
       const filters = photo.filters || {};
       const modulateOptions = {};
       const rawCompositeMode = customization.rawCompositeMode === true;
@@ -671,6 +725,30 @@ router.post("/:sessionId/photostrip", async (req, res) => {
         }
         if (filters.vintage)
           pipeline = pipeline.tint({ r: 230, g: 198, b: 158 });
+
+        // Apply post-generation filter mode on photo overlays only (template is unaffected).
+        if (
+          ["monochrome", "bw", "blackwhite", "black-and-white"].includes(
+            photoFilterMode
+          )
+        ) {
+          pipeline = pipeline.grayscale();
+        } else if (["rio", "rio-de-janeiro", "rj"].includes(photoFilterMode)) {
+  pipeline = pipeline
+    // Keep the slight desaturation for the vintage feel
+    .modulate({ saturation: 0.85 })
+    
+    .linear(
+      // THE HIGHLIGHTS (Multipliers): 
+      // We bump Green (1.10) to mix with the Red (1.25). 
+      // This shifts the bright parts of the image from pink to a warm, golden yellow.
+      [1.25, 1.10, 0.60], 
+      
+      // THE SHADOWS (Offsets):
+      // Kept almost exactly the same to preserve that perfect faded purple in the darks.
+      [40, 10, 75] 
+    );
+}
       } else if (debugMode) {
         console.log(
           "[PHOTOSTRIP][DEBUG] rawCompositeMode active for %s",
@@ -678,14 +756,33 @@ router.post("/:sessionId/photostrip", async (req, res) => {
         );
       }
 
-      let resized = await pipeline
-        .rotate(slot.rotation || 0, {
-          background: { r: 0, g: 0, b: 0, alpha: 0 },
-        })
-        .resize(Math.max(slot.width, 1), Math.max(slot.height, 1), {
-          fit: "cover",
-        })
-        .toBuffer();
+      let resized;
+      try {
+        resized = await pipeline
+          .rotate(slot.rotation || 0, {
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+          })
+          .resize(Math.max(slot.width, 1), Math.max(slot.height, 1), {
+            fit: "cover",
+          })
+          .toBuffer();
+      } catch (pipelineError) {
+        if (debugMode) {
+          console.log(
+            "[PHOTOSTRIP][DEBUG] Photo pipeline failed for %s (%s). Retrying without extra filters.",
+            photoId,
+            pipelineError.message
+          );
+        }
+        resized = await sharp(photoInput)
+          .rotate(slot.rotation || 0, {
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+          })
+          .resize(Math.max(slot.width, 1), Math.max(slot.height, 1), {
+            fit: "cover",
+          })
+          .toBuffer();
+      }
 
       // Flatten against a solid background if requested to avoid semi-transparent appearance
       const bgHex = customization?.photoBackground || "#000000";
@@ -1102,7 +1199,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
     } else {
       // Ensure blend over for each overlay to avoid accidental erase / default behaviors
       const normalized = overlays.map((o) => ({ ...o, blend: "over" }));
-      baseImage = baseImage.composite(normalized);
+      baseImage = sharp(await baseImage.composite(normalized).png().toBuffer());
     }
 
     // Optional export of each overlay as positioned single-layer image for extreme debugging
@@ -1162,9 +1259,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
     // If template should overlay (e.g., frame artwork), composite it now (then optionally test coverage)
     if (templateOverPhotos) {
       const templateBuf = await templateSharp.png().ensureAlpha().toBuffer();
-      baseImage = baseImage.composite([
-        { input: templateBuf, top: 0, left: 0 },
-      ]);
+      baseImage = sharp(await baseImage.composite([{ input: templateBuf, top: 0, left: 0 }]).png().toBuffer());
       if (debugMode && customization.detectTemplateCoverage) {
         try {
           // Sample center of each slot from the template buffer to detect if it's opaque near-white
@@ -1223,17 +1318,142 @@ router.post("/:sessionId/photostrip", async (req, res) => {
 
     // Force photos above template if explicitly requested (re-layer)
     if (customization.forcePhotoAboveTemplate) {
-      baseImage = baseImage.composite(overlays);
+      baseImage = sharp(await baseImage.composite(overlays).png().toBuffer());
       if (debugMode)
         console.log(
           "[PHOTOSTRIP][DEBUG] Re-applied photo overlays above template"
         );
     }
     if (footerComposite) {
-      baseImage = baseImage.composite([footerComposite]);
+      baseImage = sharp(await baseImage.composite([footerComposite]).png().toBuffer());
     }
 
-    // Optional slot outline debug overlay (after photos, before write)
+    // Add subtle dynamic date text on top-left (enabled by default).
+    const showDateStamp = customization.showDateStamp !== false;
+    if (showDateStamp) {
+      try {
+        const dateText = String(
+          customization.dateText ||
+            new Date().toLocaleDateString("en-US", {
+              month: "short",
+              day: "2-digit",
+              year: "numeric",
+            })
+        );
+        const dateFontSize = clampNumber(
+          Number(customization.dateFontSize) ||
+            Math.round(Math.min(outputWidth, outputHeight) * 0.022),
+          14,
+          44
+        );
+        const dateMargin = clampNumber(
+          Number(customization.dateMargin) ||
+            Math.round(Math.min(outputWidth, outputHeight) * 0.014),
+          6,
+          40
+        );
+        const textWidth = Math.max(
+          dateFontSize * 6,
+          Math.round(dateText.length * dateFontSize * 0.78) +
+            Math.round(dateFontSize * 1.4)
+        );
+        const textHeight = Math.round(dateFontSize * 1.35);
+        const baselineY = Math.round(dateFontSize * 0.98);
+        const dateTextSvg = `<svg width="${textWidth}" height="${textHeight}" xmlns="http://www.w3.org/2000/svg"><text x="0" y="${baselineY}" font-family="Caveat, Segoe Script, Brush Script MT, cursive" font-size="${dateFontSize}" fill="#000000" fill-opacity="0.58" letter-spacing="0.3">${escapeXml(
+          dateText
+        )}</text></svg>`;
+
+        baseImage = sharp(
+          await baseImage
+            .composite([
+              {
+                input: Buffer.from(dateTextSvg),
+                top: dateMargin,
+                left: dateMargin,
+                blend: "over",
+              },
+            ])
+            .png()
+            .toBuffer()
+        );
+      } catch (dateError) {
+        console.log(
+          "[PHOTOSTRIP][DEBUG] Failed to add date stamp",
+          dateError.message
+        );
+      }
+    }
+
+    // Embed QR on bottom-right of generated strip (enabled by default).
+    const embedQr = customization.embedQr !== false;
+    const cloudinaryEnabled = isCloudinaryConfigured();
+    const cloudinaryPublicIdBase = `${sessionId}-${Date.now()}`;
+    const cloudinaryFolder = "giopix/photostrips";
+    const cloudinaryPublicId = `${cloudinaryFolder}/${cloudinaryPublicIdBase}`;
+    let qrShareUrl = `${resolvePublicBaseUrl(req)}/api/sessions/${encodeURIComponent(
+      sessionId
+    )}/share`;
+    if (cloudinaryEnabled) {
+      const directCloudinaryUrl = buildCloudinaryImageUrl(
+        cloudinaryPublicId,
+        "jpg"
+      );
+      if (directCloudinaryUrl) qrShareUrl = directCloudinaryUrl;
+    }
+    if (embedQr) {
+      try {
+        const qrSize = clampNumber(
+          Number(customization.qrSize) || Math.round(Math.min(outputWidth, outputHeight) * 0.105),
+          72,
+          220
+        );
+        const qrPad = clampNumber(
+          Number(customization.qrPadding) || Math.round(qrSize * 0.06),
+          4,
+          20
+        );
+        const qrMargin = clampNumber(
+          Number(customization.qrMargin) || Math.round(Math.min(outputWidth, outputHeight) * 0.014),
+          4,
+          36
+        );
+        const panelSize = qrSize + qrPad * 2;
+        const qrLeft = Math.max(0, outputWidth - panelSize - qrMargin);
+        const qrTop = Math.max(0, outputHeight - panelSize - qrMargin);
+
+        const qrInput = await QRCode.toBuffer(qrShareUrl, {
+          type: "png",
+          width: qrSize,
+          margin: 0,
+          color: {
+            dark: "#000000",
+            light: "#FFFFFF",
+          },
+          errorCorrectionLevel: "M",
+        });
+
+        const panelSvg = `<svg width="${panelSize}" height="${panelSize}" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="${panelSize}" height="${panelSize}" rx="${Math.round(
+          panelSize * 0.06
+        )}" ry="${Math.round(panelSize * 0.06)}" fill="#FFFFFF" fill-opacity="0.93" stroke="#0f172a" stroke-opacity="0.16" stroke-width="${Math.max(
+          1,
+          Math.round(panelSize * 0.012)
+        )}"/></svg>`;
+
+        baseImage = sharp(
+          await baseImage
+            .composite([
+              { input: Buffer.from(panelSvg), top: qrTop, left: qrLeft, blend: "over" },
+              { input: qrInput, top: qrTop + qrPad, left: qrLeft + qrPad, blend: "over" },
+            ])
+            .png()
+            .toBuffer()
+        );
+      } catch (qrError) {
+        console.log("[PHOTOSTRIP][DEBUG] Failed to embed QR overlay", qrError.message);
+      }
+    }
+
+    /*  Optional slot outline debug overlay (after photos, before write)
     if (debugMode && customization.debugSlots !== false) {
       const outlineSvgParts = slotDefinitions.slice(0, 50).map((s, i) => {
         const color = [
@@ -1254,10 +1474,9 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       const outlineSvg = `<svg width="${outputWidth}" height="${outputHeight}" xmlns="http://www.w3.org/2000/svg">${outlineSvgParts.join(
         ""
       )}</svg>`;
-      baseImage = baseImage.composite([
-        { input: Buffer.from(outlineSvg), top: 0, left: 0 },
-      ]);
-    }
+      baseImage = sharp(await baseImage.composite([{ input: Buffer.from(outlineSvg), top: 0, left: 0 }]).png().toBuffer());
+    } **/
+   
     // Final safety: flatten onto opaque white so hidden alpha becomes visible (unless skipped)
     if (!customization.skipFinalFlatten) {
       try {
@@ -1276,12 +1495,42 @@ router.post("/:sessionId/photostrip", async (req, res) => {
     const finalPipeline = baseImage.jpeg({
       quality: clampNumber(customization.quality ?? 90, 40, 100),
     });
-    await finalPipeline.toFile(outputPath);
+
+    const finalBuffer = await finalPipeline.toBuffer();
+    let finalUrlPath = `/uploads/photostrips/${outputFilename}`;
+    let cloudinaryPhotostripPath = null;
+
+    try {
+      // Always persist a local copy for kiosk/offline reliability.
+      await fs.writeFile(outputPath, finalBuffer);
+      if (cloudinaryEnabled) {
+        try {
+          const uploaded = await uploadImageBuffer(finalBuffer, {
+            folder: cloudinaryFolder,
+            public_id: cloudinaryPublicIdBase,
+            format: "jpg",
+          });
+          cloudinaryPhotostripPath = uploaded.secure_url;
+          if (debugMode)
+            console.log(
+              "[PHOTOSTRIP][DEBUG] Also saved to Cloudinary:",
+              uploaded.public_id
+            );
+        } catch (cloudErr) {
+          console.log(
+            "[PHOTOSTRIP][DEBUG] Cloudinary save failed, local copy kept:",
+            cloudErr.message
+          );
+        }
+      }
+    } catch (err) {
+      console.log("[PHOTOSTRIP][DEBUG] Failed to write local photostrip", err.message);
+      throw err;
+    }
     if (debugMode) {
       const debugOut = outputPath.replace(/\.jpg$/i, "-debug.jpg");
       try {
-        await sharp(outputPath)
-          .composite([])
+        await sharp(finalBuffer)
           .jpeg({ quality: 80 })
           .toFile(debugOut);
         console.log("[PHOTOSTRIP][DEBUG] Wrote debug duplicate", debugOut);
@@ -1300,7 +1549,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       if (debugMode)
         console.log("[PHOTOSTRIP][DEBUG] Returning photos-only path to client");
     } else {
-      session.photostripPath = `/uploads/photostrips/${outputFilename}`;
+      session.photostripPath = finalUrlPath;
     }
     session.status = "completed";
     session.selectedPhotos = selectedPhotoIds;
@@ -1311,6 +1560,9 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       session.templateId = template._id;
     }
     session.metadata = session.metadata || {};
+    if (cloudinaryPhotostripPath) {
+      session.metadata.cloudinaryPhotostripPath = cloudinaryPhotostripPath;
+    }
     session.metadata.endTime = new Date();
     if (session.metadata.startTime) {
       session.metadata.duration =
@@ -1326,15 +1578,21 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       photostrip: {
         path: session.photostripPath,
         url: session.photostripPath,
+        sharePath: cloudinaryPhotostripPath || session.photostripPath,
+        qrShareUrl,
         template: template._id.toString(),
         photosUsed: overlays.length,
         width: outputWidth,
         height: outputHeight,
-        layout: layout || (hasTemplateSlots ? "templateSlots" : "auto"),
+        layout:
+          layout ||
+          (Array.isArray(template.photoSlots) && template.photoSlots.length > 0
+            ? "templateSlots"
+            : "auto"),
         photosOnlyPath: photosOnlyPathRef
           ? `/uploads/photostrips/${path.basename(photosOnlyPathRef)}`
           : undefined,
-        finalCompositePath: `/uploads/photostrips/${outputFilename}`,
+        finalCompositePath: finalUrlPath,
         debug: debugMode
           ? {
               overlays: overlays.length,
@@ -1348,16 +1606,19 @@ router.post("/:sessionId/photostrip", async (req, res) => {
         id: session.sessionId,
         status: session.status,
         photostripPath: session.photostripPath,
+        sharePath: cloudinaryPhotostripPath || session.photostripPath,
         photosOnlyPath: photosOnlyPathRef
           ? `/uploads/photostrips/${path.basename(photosOnlyPathRef)}`
           : undefined,
-        finalCompositePath: `/uploads/photostrips/${outputFilename}`,
+        finalCompositePath: finalUrlPath,
       },
       message: "Photostrip generated successfully",
     });
   } catch (error) {
     console.error("Generate photostrip error:", error);
-    res.status(500).json({ error: "Failed to generate photostrip" });
+    res
+      .status(500)
+      .json({ error: "Failed to generate photostrip", details: error.message });
   }
 });
 
@@ -1427,5 +1688,46 @@ router.delete(
     }
   }
 );
+
+// GridFS retrieve route
+router.get("/gridfs/photostrips/:filename", async (req, res) => {
+  try {
+    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+      bucketName: "photostrips"
+    });
+    const files = await bucket.find({ filename: req.params.filename }).toArray();
+    if (!files || files.length === 0) {
+      return res.status(404).json({ error: "File not found in GridFS" });
+    }
+    res.set("Content-Type", files[0].contentType || "image/jpeg");
+    const downloadStream = bucket.openDownloadStreamByName(req.params.filename);
+    downloadStream.pipe(res);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch from GridFS", details: err.message });
+  }
+});
+
+// QR share endpoint: resolves to the current session photostrip URL.
+router.get("/:sessionId/share", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await Session.findOne({ sessionId }).lean();
+    const resolvedSharePath =
+      session?.metadata?.cloudinaryPhotostripPath || session?.photostripPath;
+    if (!session || !resolvedSharePath) {
+      return res.status(404).json({ error: "Photostrip not found for session" });
+    }
+
+    const location = String(resolvedSharePath);
+    if (/^https?:\/\//i.test(location)) {
+      return res.redirect(302, location);
+    }
+
+    const base = `${req.protocol}://${req.get("host")}`;
+    return res.redirect(302, `${base}${location}`);
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to resolve share URL", details: err.message });
+  }
+});
 
 export default router;

@@ -7,11 +7,40 @@ import toast from 'react-hot-toast';
 import SharePanel from '../SharePanel';
 
 const CompleteStage = () => {
-  const { resetSession, session } = usePhotoBoothStore();
+  const { resetSession, session, regeneratePhotostripWithPhotoFilter } = usePhotoBoothStore();
   const [showFinal, setShowFinal] =  useState(false);
+  const [activeFilter, setActiveFilter] = useState<'none' | 'monochrome' | 'rio'>('none');
+  const [isApplyingFilter, setIsApplyingFilter] = useState(false);
+
+  const previewPath = (showFinal && session?.finalCompositePath)
+    ? session.finalCompositePath
+    : session?.photostripPath;
+
+  const shareCandidate =
+    session?.sharePath ||
+    session?.metadata?.cloudinaryPhotostripPath ||
+    previewPath;
+
+  const shareUrl = shareCandidate
+    ? (/^https?:\/\//i.test(shareCandidate) ? shareCandidate : apiClient.getFileUrl(shareCandidate))
+    : '';
 
   const handleNewSession = () => {
     resetSession();
+  };
+
+  const applyPhotoFilter = async (filter: 'none' | 'monochrome' | 'rio') => {
+    try {
+      setIsApplyingFilter(true);
+      await regeneratePhotostripWithPhotoFilter(filter);
+      setActiveFilter(filter);
+      const label = filter === 'none' ? 'Original colors restored' : filter === 'monochrome' ? 'Monochrome filter applied' : 'Rio de Janeiro filter applied';
+      toast.success(label);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to apply filter');
+    } finally {
+      setIsApplyingFilter(false);
+    }
   };
 
   const handleDownload = async () => {
@@ -115,14 +144,37 @@ const CompleteStage = () => {
                   </label>
                 )}
               </div>
+              <div className="mb-4 flex items-center gap-2">
+                <button
+                  onClick={() => applyPhotoFilter('none')}
+                  disabled={isApplyingFilter || activeFilter === 'none'}
+                  className="btn-secondary text-sm disabled:opacity-60"
+                >
+                  Original
+                </button>
+                <button
+                  onClick={() => applyPhotoFilter('monochrome')}
+                  disabled={isApplyingFilter || activeFilter === 'monochrome'}
+                  className="btn-secondary text-sm disabled:opacity-60"
+                >
+                  Monochrome
+                </button>
+                <button
+                  onClick={() => applyPhotoFilter('rio')}
+                  disabled={isApplyingFilter || activeFilter === 'rio'}
+                  className="btn-secondary text-sm disabled:opacity-60"
+                >
+                  Rio de Janeiro
+                </button>
+              </div>
               <img
-                src={apiClient.getFileUrl((showFinal && session.finalCompositePath) ? session.finalCompositePath : session.photostripPath) + `?v=${Date.now()}`}
+                src={previewPath ? `${apiClient.getFileUrl(previewPath)}?v=${Date.now()}` : ''}
                 alt="Photostrip"
                 className="max-h-[28rem] w-auto rounded-lg shadow bg-gray-50"
                 onError={(e)=>{(e.currentTarget as HTMLImageElement).style.opacity='0.3';}}
               />
               <div className="mt-6 w-full max-w-xl">
-                <SharePanel url={apiClient.getFileUrl((showFinal && session.finalCompositePath) ? session.finalCompositePath : session.photostripPath)} />
+                <SharePanel url={shareUrl} />
               </div>
             </div>
           ) : (

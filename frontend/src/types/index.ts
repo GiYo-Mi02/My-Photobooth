@@ -55,6 +55,7 @@ export interface Session {
   selectedPhotos: string[];
   templateId?: string;
   photostripPath?: string;
+  sharePath?: string;
   photosOnlyPath?: string; // diagnostic photos-only composite (no template/footer)
   finalCompositePath?: string; // always points to the full final composite from backend
   settings: SessionSettings;
@@ -72,6 +73,7 @@ export interface SessionSettings {
 export interface SessionMetadata {
   userAgent?: string;
   ipAddress?: string;
+  cloudinaryPhotostripPath?: string;
   startTime: string;
   endTime?: string;
   duration?: number;
@@ -172,5 +174,6 @@ export interface TemplateUploadRequest {
   description?: string;
   category?: string;
   photoSlots: PhotoSlot[];
+  isActive?: boolean;
   isDefault?: boolean;
 }

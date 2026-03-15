@@ -7,6 +7,7 @@ export const templateService = {
     category?: string; 
     page?: number; 
     limit?: number;
+    includeInactive?: boolean;
   }): Promise<{
     templates: Template[];
     categories: string[];
@@ -20,6 +21,7 @@ export const templateService = {
     if (params?.category) queryParams.append('category', params.category);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.includeInactive) queryParams.append('includeInactive', 'true');
 
     return apiClient.get<{
       templates: Template[];

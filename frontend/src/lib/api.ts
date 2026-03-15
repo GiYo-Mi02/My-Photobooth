@@ -2,12 +2,41 @@ import axios from 'axios';
 import type { AxiosInstance, AxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
 
+const trimTrailingSlashes = (value: string) => value.replace(/\/+$/, '');
+const isPlaceholderHost = (value: string) =>
+  /your-public-ip-or-domain|example\.com/i.test(value);
+
+const resolveApiBaseUrl = (): string => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL as string;
+  }
+
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const protocol = window.location.protocol || 'http:';
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      return `${protocol}//${host}:5000/api`;
+    }
+  }
+
+  return 'http://localhost:5000/api';
+};
+
+const resolvePublicFileBaseUrl = (): string => {
+  const envPublicBase = import.meta.env.VITE_PUBLIC_BASE_URL as string | undefined;
+  if (envPublicBase && !isPlaceholderHost(envPublicBase)) {
+    return trimTrailingSlashes(envPublicBase);
+  }
+
+  return trimTrailingSlashes(resolveApiBaseUrl().replace(/\/api\/?$/, ''));
+};
+
 class ApiClient {
   private instance: AxiosInstance;
 
   constructor() {
     this.instance = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+      baseURL: resolveApiBaseUrl(),
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -107,7 +136,9 @@ class ApiClient {
 
   // Get the base URL for file access
   getFileUrl(path: string): string {
-    return `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000'}${path}`;
+    if (/^https?:\/\//i.test(path)) return path;
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    return `${resolvePublicFileBaseUrl()}${normalizedPath}`;
   }
 }
 

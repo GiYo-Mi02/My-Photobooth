@@ -125,7 +125,8 @@ const Templates = () => {
     setLoading(true);
     try {
       // simple retry 2x with small delay
-      const attempt = async () => templateService.getTemplates();
+      const attempt = async () =>
+        templateService.getTemplates({ includeInactive: true, limit: 500, page: 1 });
       let res = await attempt();
       if (!res?.templates) {
         await new Promise(r => setTimeout(r, 400));
@@ -199,6 +200,19 @@ const Templates = () => {
       await loadTemplates();
     } catch (e: any) {
       toast.error(e?.message || 'Delete failed');
+    }
+  };
+
+  const handleToggleTemplateVisibility = async (template: Template) => {
+    const nextActiveState = !template.isActive;
+    try {
+      await templateService.updateTemplate(template._id, {
+        isActive: nextActiveState,
+      });
+      toast.success(nextActiveState ? 'Template unhidden' : 'Template hidden');
+      await loadTemplates();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update template visibility');
     }
   };
 
@@ -386,12 +400,21 @@ const Templates = () => {
                     <div className="p-3">
                       <div className="flex items-start justify-between">
                         <div className="font-semibold text-gray-900 truncate" title={t.name}>{t.name}</div>
-                        {t.isDefault && <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">Default</span>}
+                        <div className="flex items-center gap-1">
+                          {!t.isActive && <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-700">Hidden</span>}
+                          {t.isDefault && <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">Default</span>}
+                        </div>
                       </div>
                       <div className="text-sm text-gray-500 truncate">{t.category}</div>
                       <div className="flex items-center justify-between mt-3">
                         <div className="text-xs text-gray-500">{t.photoSlots.length} slots</div>
                         <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => handleToggleTemplateVisibility(t)}
+                            className="text-gray-700 text-sm hover:underline"
+                          >
+                            {t.isActive ? 'Hide' : 'Unhide'}
+                          </button>
                           <button onClick={() => openEdit(t)} className="text-primary-700 text-sm hover:underline">Edit</button>
                           <button onClick={() => handleDelete(t._id)} className="text-red-600 text-sm hover:underline">Delete</button>
                         </div>

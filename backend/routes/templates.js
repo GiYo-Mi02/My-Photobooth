@@ -4,7 +4,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
 import Template from "../models/Template.js";
-import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
+import {
+  authMiddleware,
+  adminMiddleware,
+  optionalAuthMiddleware,
+} from "../middleware/auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,12 +62,16 @@ const upload = multer({
 });
 
 // Get all active templates
-router.get("/", async (req, res) => {
+router.get("/", optionalAuthMiddleware, async (req, res) => {
   try {
-    const { category, page = 1, limit = 12 } = req.query;
+    const { category, page = 1, limit = 12, includeInactive } = req.query;
     const skip = (page - 1) * limit;
+    const wantsInactive =
+      includeInactive === true || includeInactive === "true";
+    const isAdmin = req.user?.role === "admin";
+    const allowInactive = wantsInactive && isAdmin;
 
-    const query = { isActive: true };
+    const query = allowInactive ? {} : { isActive: true };
     if (category && category !== "all") {
       query.category = category;
     }
@@ -75,7 +83,10 @@ router.get("/", async (req, res) => {
       .sort({ isDefault: -1, usageCount: -1, createdAt: -1 });
 
     const total = await Template.countDocuments(query);
-    const categories = await Template.distinct("category", { isActive: true });
+    const categories = await Template.distinct(
+      "category",
+      allowInactive ? {} : { isActive: true }
+    );
 
     res.json({
       templates,

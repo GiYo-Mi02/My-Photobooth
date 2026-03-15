@@ -17,6 +17,7 @@ interface PhotoBoothStore extends PhotoBoothState {
   generatePhotostripLandscape: () => Promise<string>;
   generatePhotostripPortrait: () => Promise<string>;
   generatePhotostrip16: () => Promise<string>;
+  regeneratePhotostripWithPhotoFilter: (filter: 'none' | 'monochrome' | 'rio') => Promise<string>;
   nextStage: () => void;
   previousStage: () => void;
   setStage: (stage: PhotoBoothState['stage']) => void;
@@ -110,6 +111,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
           selectedPhotos: session.selectedPhotos,
           templateId: session.template?._id,
           photostripPath: session.photostripPath,
+          sharePath: session.metadata?.cloudinaryPhotostripPath || session.photostripPath,
           settings: session.settings,
           metadata: session.metadata,
           createdAt: session.createdAt,
@@ -213,11 +215,12 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         customization: { autoLayout: true } as any,
       } as any);
 
-      const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
+      const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
       set((state) => ({
         session: state.session ? {
           ...state.session,
           photostripPath: displayPath,
+          sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
           photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
           finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
           status: 'completed',
@@ -243,7 +246,6 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
     const photos = selectedPhotos.slice(0, 12);
     const w = (currentTemplate.dimensions?.width as any) || 1800;
     const h = (currentTemplate.dimensions?.height as any) || 1200;
-    const footerDate = new Date().toLocaleDateString(undefined, { month: '2-digit', day: '2-digit', year: '2-digit' }).replace(/\//g, '.');
     const response = await sessionService.generatePhotostrip(session.sessionId, {
       templateId: currentTemplate._id,
       selectedPhotoIds: photos.map(p => p._id),
@@ -253,17 +255,17 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       layout: 'dual3x2',
       customization: {
         autoLayout: true,
-        footer: { hashtag: '#PierceMyHeart', date: footerDate },
         slotBorderRadius: 36,
         debug: true,
       },
     } as any);
 
-    const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
+    const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
     set((state) => ({
       session: state.session ? {
         ...state.session,
         photostripPath: displayPath,
+        sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
         photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
         finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
         status: 'completed'
@@ -287,11 +289,12 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       forceOrientation: 'landscape',
       customization: { autoLayout: true },
     } as any);
-    const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
+    const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
     set((state) => ({
       session: state.session ? {
         ...state.session,
         photostripPath: displayPath,
+        sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
         photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
         finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
         status: 'completed'
@@ -315,11 +318,12 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       forceOrientation: 'portrait',
       customization: { autoLayout: true },
     } as any);
-    const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
+    const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
     set((state) => ({
       session: state.session ? {
         ...state.session,
         photostripPath: displayPath,
+        sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
         photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
         finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
         status: 'completed'
@@ -345,17 +349,68 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       layout: 'left1x4_right2x6',
       customization: { autoLayout: false, padding: 10 },
     } as any);
-    const displayPath = response.session.photosOnlyPath || response.photostrip.photosOnlyPath || response.session.photostripPath;
+    const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
     set((state) => ({
       session: state.session ? {
         ...state.session,
         photostripPath: displayPath,
+        sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
         photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
         finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
         status: 'completed'
       } : null,
       stage: 'complete'
     }));
+    return displayPath;
+  },
+
+  regeneratePhotostripWithPhotoFilter: async (filter: 'none' | 'monochrome' | 'rio'): Promise<string> => {
+    const { session, selectedPhotos, currentTemplate } = get();
+    if (!session) throw new Error('No active session');
+
+    const templateId = currentTemplate?._id || session.templateId;
+    if (!templateId) throw new Error('No template selected for this session');
+
+    const selectedIds =
+      selectedPhotos.length > 0
+        ? selectedPhotos.map((p) => p._id)
+        : (session.selectedPhotos || []);
+
+    if (!selectedIds.length) {
+      throw new Error('No selected photos available for filtering');
+    }
+
+    const tw = (currentTemplate?.dimensions?.width as any) || 1800;
+    const th = (currentTemplate?.dimensions?.height as any) || 1200;
+
+    const response = await sessionService.generatePhotostrip(session.sessionId, {
+      templateId,
+      selectedPhotoIds: selectedIds,
+      targetWidth: tw,
+      targetHeight: th,
+      forceOrientation: th >= tw ? 'portrait' : 'landscape',
+      customization: {
+        autoLayout: true,
+        respectTemplateSlots: true,
+        photoFilter: filter,
+      },
+    } as any);
+
+    const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
+    set((state) => ({
+      session: state.session
+        ? {
+            ...state.session,
+            photostripPath: displayPath,
+            sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
+            photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
+            finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
+            status: 'completed',
+          }
+        : null,
+      stage: 'complete',
+    }));
+
     return displayPath;
   },
 

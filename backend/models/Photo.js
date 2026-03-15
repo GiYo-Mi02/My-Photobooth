@@ -19,6 +19,16 @@ const photoSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    storageProvider: {
+      type: String,
+      enum: ["local", "cloudinary"],
+      default: "local",
+    },
+    cloudinary: {
+      publicId: String,
+      version: Number,
+      secureUrl: String,
+    },
     size: {
       type: Number,
       required: true,

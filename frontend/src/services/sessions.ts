@@ -100,6 +100,7 @@ export const sessionService = {
     photostrip: {
       path: string;
       url: string;
+      sharePath?: string;
       template: string;
       photosUsed: number;
       photosOnlyPath?: string;
@@ -110,6 +111,7 @@ export const sessionService = {
       id: string;
       status: string;
       photostripPath: string;
+      sharePath?: string;
       photosOnlyPath?: string;
       finalCompositePath?: string;
     };

@@ -157,6 +157,7 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
       filename,
       originalName,
       path: `/uploads/photos/${filename}`,
+      storageProvider: "local",
       size: fileSize,
       mimeType,
       photoNumber: assignedPhotoNumber,

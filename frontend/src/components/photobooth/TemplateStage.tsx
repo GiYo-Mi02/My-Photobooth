@@ -15,7 +15,7 @@ const TemplateStage = () => {
     let mounted = true;
     (async () => {
       try {
-        const res = await templateService.getTemplates();
+        const res = await templateService.getTemplates({ limit: 500, page: 1 });
         if (mounted) setTemplates(res.templates);
       } catch (e) {
         toast.error('Failed to load templates');
