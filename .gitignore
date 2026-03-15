@@ -7,3 +7,11 @@ node_modules
 **/.env.*
 !.env.example
 !**/.env.example
+
+# Runtime upload artifacts
+uploads/photos/
+uploads/photostrips/
+
+# Keep template assets in git
+!uploads/templates/
+!uploads/templates/**
