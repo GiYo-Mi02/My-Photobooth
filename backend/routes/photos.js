@@ -89,10 +89,11 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
       await session.save();
     }
 
-    // Enforce max 10 photos per session using atomic increment
+    // Enforce max photos per session dynamically (default to 6) using atomic increment
     // Attempt to increment; if already at limit, reject
+    const maxPhotos = session.settings?.maxPhotos || 6;
     const updatedSession = await Session.findOneAndUpdate(
-      { _id: session._id, totalPhotos: { $lt: 10 } },
+      { _id: session._id, totalPhotos: { $lt: maxPhotos } },
       { $inc: { totalPhotos: 1 } },
       { new: true }
     );
@@ -171,8 +172,8 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
 
     await photo.save();
 
-    // Update session status/timestamps if reached 10
-    if (updatedSession.totalPhotos >= 10) {
+    // Update session status/timestamps if reached limit
+    if (updatedSession.totalPhotos >= maxPhotos) {
       updatedSession.status = "completed";
       updatedSession.metadata.endTime = new Date();
       updatedSession.metadata.duration =

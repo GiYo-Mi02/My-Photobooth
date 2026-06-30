@@ -120,7 +120,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         photos: response.photos,
         currentPhotoNumber: session.totalPhotos + 1,
         stage: session.status === 'completed' && session.photostripPath ? 'complete' : 
-               session.totalPhotos >= 10 ? 'review' : 'capture',
+               session.totalPhotos >= (session.settings?.maxPhotos ?? 6) ? 'review' : 'capture',
       });
     } catch (error) {
       console.error('Failed to load session:', error);
@@ -139,6 +139,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         base64Data,
       });
 
+      const maxPhotos = session.settings?.maxPhotos ?? 6;
       set((state) => ({
         photos: [...state.photos, response.photo],
         session: state.session ? {
@@ -146,11 +147,11 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
           totalPhotos: response.session.totalPhotos,
           status: response.session.status as 'active' | 'completed' | 'cancelled',
         } : null,
-        currentPhotoNumber: Math.min(11, (response.session.totalPhotos || 0) + 1),
+        currentPhotoNumber: Math.min(maxPhotos + 1, (response.session.totalPhotos || 0) + 1),
       }));
 
-      // Move to review stage if we've taken 10 photos
-      if (response.session.totalPhotos >= 10) {
+      // Move to review stage if we've taken maxPhotos photos
+      if (response.session.totalPhotos >= maxPhotos) {
         set({ stage: 'review' });
       }
     } catch (error) {
@@ -460,7 +461,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
   startAutoCapture: (intervalSeconds: number) => {
     const { photos, session } = get();
     if (!session) return;
-    const maxPhotos = Math.max(1, session.settings?.maxPhotos ?? 10);
+    const maxPhotos = Math.max(1, session.settings?.maxPhotos ?? 6);
     if (photos.length >= maxPhotos) return;
     set({
       autoCapture: {

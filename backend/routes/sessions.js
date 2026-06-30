@@ -496,14 +496,32 @@ router.post("/:sessionId/photostrip", async (req, res) => {
     outputWidth = Math.max(400, Math.round(outputWidth));
     outputHeight = Math.max(400, Math.round(outputHeight));
 
+    const templateSlots = Array.isArray(template?.photoSlots) ? template.photoSlots : [];
+    const targetCount = templateSlots.length > 0 ? templateSlots.length : selectedPhotoIds.length;
+
     const slotDefinitions = resolveSlots({
       template,
-      count: selectedPhotoIds.length,
+      count: targetCount,
       outputWidth,
       outputHeight,
       layout,
       customization,
     });
+
+    // If the template has slots and we are mirroring (template slots is twice the number of selected photos),
+    // let's partition them to left/right columns and sort top-to-bottom so order of slot addition doesn't confuse the system.
+    let orderedSlots = [...slotDefinitions];
+    if (slotDefinitions.length === 2 * selectedPhotoIds.length && selectedPhotoIds.length > 0) {
+      const midX = outputWidth / 2;
+      const leftSlots = slotDefinitions.filter(s => (s.x + s.width / 2) < midX)
+                                       .sort((a, b) => a.y - b.y);
+      const rightSlots = slotDefinitions.filter(s => (s.x + s.width / 2) >= midX)
+                                        .sort((a, b) => a.y - b.y);
+      
+      if (leftSlots.length === selectedPhotoIds.length && rightSlots.length === selectedPhotoIds.length) {
+        orderedSlots = [...leftSlots, ...rightSlots];
+      }
+    }
 
     const debugMode =
       customization &&
@@ -525,7 +543,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       );
     }
 
-    if (slotDefinitions.length < selectedPhotoIds.length) {
+    if (orderedSlots.length < selectedPhotoIds.length) {
       return res.status(400).json({
         error: "Unable to determine layout for all selected photos",
       });
@@ -550,9 +568,9 @@ router.post("/:sessionId/photostrip", async (req, res) => {
 
     const overlays = [];
 
-    for (let index = 0; index < selectedPhotoIds.length; index += 1) {
-      const photoId = selectedPhotoIds[index];
-      const slot = slotDefinitions[index];
+    for (let index = 0; index < orderedSlots.length; index += 1) {
+      const photoId = selectedPhotoIds[index % selectedPhotoIds.length];
+      const slot = orderedSlots[index];
       const photo = photosById.get(photoId.toString());
 
       if (!photo) continue;

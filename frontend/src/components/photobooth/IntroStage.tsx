@@ -26,7 +26,7 @@ const IntroStage = () => {
             Welcome to GPix
           </h1>
           <p className="text-xl text-gray-600 mb-8">
-            Get ready to capture amazing moments! You'll have 10 photo opportunities 
+            Get ready to capture amazing moments! You'll have 6 photo opportunities 
             with 5 seconds between each shot.
           </p>
         </div>
@@ -36,7 +36,7 @@ const IntroStage = () => {
           <div className="space-y-4 text-left">
             <div className="flex items-center space-x-3">
               <div className="bg-primary-100 text-primary-600 rounded-full w-8 h-8 flex items-center justify-center font-semibold">1</div>
-              <span className="text-gray-700">Take up to 10 photos with automatic timer</span>
+              <span className="text-gray-700">Take up to 6 photos with automatic timer</span>
             </div>
             <div className="flex items-center space-x-3">
               <div className="bg-primary-100 text-primary-600 rounded-full w-8 h-8 flex items-center justify-center font-semibold">2</div>

@@ -45,7 +45,7 @@ const CaptureStage = () => {
     createSession,
   } = usePhotoBoothStore();
 
-  const maxPhotos = Math.max(1, session?.settings?.maxPhotos ?? 10);
+  const maxPhotos = Math.max(1, session?.settings?.maxPhotos ?? 6);
 
   // (Removed) videoConstraints now owned by PersistentWebcam.
 

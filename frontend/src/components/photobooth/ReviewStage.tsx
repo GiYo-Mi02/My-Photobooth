@@ -12,13 +12,17 @@ const ReviewStage = () => {
     if (selectedIds.has(photoId)) {
       deselectPhoto(photoId);
     } else {
+      if (selectedPhotos.length >= 4) {
+        toast.error('You can only select exactly 4 photos');
+        return;
+      }
       selectPhoto(photoId);
     }
   };
 
   const handleContinue = () => {
-    if (selectedPhotos.length === 0) {
-      toast.error('Please select at least one photo to continue');
+    if (selectedPhotos.length !== 4) {
+      toast.error('Please select exactly 4 photos to continue');
       return;
     }
     nextStage();
@@ -41,7 +45,7 @@ const ReviewStage = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-4 mb-8">
           {photos.map((photo) => {
             const isSel = selectedIds.has(photo._id);
             return (

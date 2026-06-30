@@ -49,7 +49,7 @@ const sessionSchema = new mongoose.Schema(
       },
       maxPhotos: {
         type: Number,
-        default: 10,
+        default: 6,
       },
       autoAdvance: {
         type: Boolean,

@@ -4,7 +4,7 @@ import { FiCamera, FiImage, FiFilter, FiDownload, FiUsers, FiZap } from 'react-i
 
 const Home = () => {
   const features = [
-    { icon: <FiCamera className="h-8 w-8" />, title: '10 Photo Sessions', description: 'Take up to 10 photos with 5-second intervals between each shot.' },
+    { icon: <FiCamera className="h-8 w-8" />, title: '6 Photo Sessions', description: 'Take up to 6 photos with 5-second intervals between each shot.' },
     { icon: <FiFilter className="h-8 w-8" />, title: 'Filter Effects', description: 'Apply filters like B&W, sepia, vintage, and more to your photos.' },
     { icon: <FiImage className="h-8 w-8" />, title: 'Custom Templates', description: 'Choose photostrip templates or upload your own designs.' },
     { icon: <FiDownload className="h-8 w-8" />, title: 'Instant Download', description: 'Generate and download your photostrip instantly.' },
@@ -14,7 +14,7 @@ const Home = () => {
 
   const steps = [
     { step: '01', title: 'Start Session', description: 'Click start to begin your GioPix session.' },
-    { step: '02', title: 'Take Photos', description: 'Capture up to 10 photos with 5-second intervals.' },
+    { step: '02', title: 'Take Photos', description: 'Capture up to 6 photos with 5-second intervals.' },
     { step: '03', title: 'Select & Filter', description: 'Choose your favorites and apply filters.' },
     { step: '04', title: 'Generate Strip', description: 'Create and download your custom photostrip.' },
   ];
