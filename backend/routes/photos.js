@@ -3,9 +3,11 @@ import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
+import fs from "fs/promises";
 import Photo from "../models/Photo.js";
 import Session from "../models/Session.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { isCloudinaryConfigured, uploadImageBuffer } from "../lib/cloudinary.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,10 +35,22 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-    files: 1,
+    fileSize: 30 * 1024 * 1024, // 30MB
+    files: 2,
   },
   fileFilter: (req, file, cb) => {
+    if (file.fieldname === "livePhoto") {
+      const allowedVideoTypes = /webm|mp4|quicktime|ogg/;
+      const extname = allowedVideoTypes.test(
+        path.extname(file.originalname).toLowerCase()
+      );
+      const mimetype = allowedVideoTypes.test(file.mimetype);
+      if (mimetype && extname) {
+        return cb(null, true);
+      }
+      return cb(new Error("Only video files are allowed for livePhoto!"));
+    }
+
     const allowedTypes = /jpeg|jpg|png|gif|webp/;
     const extname = allowedTypes.test(
       path.extname(file.originalname).toLowerCase()
@@ -52,7 +66,13 @@ const upload = multer({
 });
 
 // Upload photo (base64 or file)
-router.post("/upload", upload.single("photo"), async (req, res) => {
+router.post(
+  "/upload",
+  upload.fields([
+    { name: "photo", maxCount: 1 },
+    { name: "livePhoto", maxCount: 1 },
+  ]),
+  async (req, res) => {
   try {
     const { sessionId, photoNumber, base64Data } = req.body;
 
@@ -123,7 +143,6 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
 
       filename = `photo-${Date.now()}-${Math.round(Math.random() * 1e9)}.jpg`;
       const photosDir = path.join(__dirname, "..", "..", "uploads", "photos");
-      const fs = await import("fs/promises");
       await fs.mkdir(photosDir, { recursive: true });
       photoPath = path.join(photosDir, filename);
       originalName = `photo-${photoNumber}.jpg`;
@@ -134,12 +153,13 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
       fileSize = imageBuffer.length;
     }
     // Handle file upload
-    else if (req.file) {
-      filename = req.file.filename;
-      photoPath = req.file.path;
-      originalName = req.file.originalname;
-      fileSize = req.file.size;
-      mimeType = req.file.mimetype;
+    else if (req.files && req.files.photo && req.files.photo[0]) {
+      const photoFile = req.files.photo[0];
+      filename = photoFile.filename;
+      photoPath = photoFile.path;
+      originalName = photoFile.originalname;
+      fileSize = photoFile.size;
+      mimeType = photoFile.mimetype;
     } else {
       if (process.env.NODE_ENV !== "production") {
         console.warn("[UPLOAD] No base64Data and no file present");
@@ -147,6 +167,49 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
       return res.status(400).json({
         error: "No photo data provided",
       });
+    }
+
+    let livePhotoPath = null;
+    if (req.files && req.files.livePhoto && req.files.livePhoto[0]) {
+      livePhotoPath = `/uploads/photos/${req.files.livePhoto[0].filename}`;
+    }
+
+    // Upload to Cloudinary if configured
+    let cloudinaryData = null;
+    let cloudinaryLiveUrl = null;
+    const cloudinaryEnabled = isCloudinaryConfigured();
+
+    if (cloudinaryEnabled) {
+      try {
+        const photoBuf = await fs.readFile(photoPath);
+        const uploadRes = await uploadImageBuffer(photoBuf, {
+          folder: `giopix/sessions/${sessionId}/photos`,
+          public_id: `photo-${assignedPhotoNumber}-${Date.now()}`,
+          format: "jpg",
+        });
+        cloudinaryData = {
+          publicId: uploadRes.public_id,
+          version: uploadRes.version,
+          secureUrl: uploadRes.secure_url,
+        };
+      } catch (err) {
+        console.warn("[UPLOAD] Cloudinary photo upload failed, using local fallback:", err.message);
+      }
+
+      if (req.files && req.files.livePhoto && req.files.livePhoto[0]) {
+        try {
+          const liveFile = req.files.livePhoto[0];
+          const liveBuf = await fs.readFile(liveFile.path);
+          const uploadRes = await uploadImageBuffer(liveBuf, {
+            resource_type: "video",
+            folder: `giopix/sessions/${sessionId}/live-photos`,
+            public_id: `live-${assignedPhotoNumber}-${Date.now()}`,
+          });
+          cloudinaryLiveUrl = uploadRes.secure_url;
+        } catch (err) {
+          console.warn("[UPLOAD] Cloudinary live video upload failed, using local fallback:", err.message);
+        }
+      }
     }
 
     // Get image metadata
@@ -157,8 +220,10 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
       sessionId: session._id,
       filename,
       originalName,
-      path: `/uploads/photos/${filename}`,
-      storageProvider: "local",
+      path: cloudinaryData?.secureUrl || `/uploads/photos/${filename}`,
+      livePhotoPath: cloudinaryLiveUrl || livePhotoPath,
+      storageProvider: cloudinaryData ? "cloudinary" : "local",
+      cloudinary: cloudinaryData || undefined,
       size: fileSize,
       mimeType,
       photoNumber: assignedPhotoNumber,

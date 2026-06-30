@@ -21,6 +21,7 @@ export interface Photo {
   filename: string;
   originalName: string;
   path: string;
+  livePhotoPath?: string;
   size: number;
   mimeType: string;
   photoNumber: number;

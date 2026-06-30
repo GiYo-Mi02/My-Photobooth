@@ -19,6 +19,10 @@ const photoSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    livePhotoPath: {
+      type: String,
+      default: null,
+    },
     storageProvider: {
       type: String,
       enum: ["local", "cloudinary"],

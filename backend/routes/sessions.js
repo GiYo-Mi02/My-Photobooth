@@ -15,6 +15,10 @@ import QRCode from "qrcode";
 
 import mongoose from "mongoose";
 import { isCloudinaryConfigured, uploadImageBuffer, ensureCloudinary } from "../lib/cloudinary.js";
+import multer from "multer";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Simple XML escape for dynamic footer text
 const escapeXml = (str = "") =>
@@ -24,9 +28,6 @@ const escapeXml = (str = "") =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
@@ -1411,12 +1412,12 @@ router.post("/:sessionId/photostrip", async (req, res) => {
         );
         const textHeight = Math.round(dateFontSize * 1.6);
         const baselineY = Math.round(dateFontSize * 1.08);
-        const dateTextSvg = `<svg width="${textWidth}" height="${textHeight}" xmlns="http://www.w3.org/2000/svg"><text x="0" y="${baselineY}" font-family="Caveat, Segoe Script, Brush Script MT, cursive" font-size="${dateFontSize}" fill="none" stroke="#ffffff" stroke-opacity="0.72" stroke-width="${Math.max(
+        const dateTextSvg = `<svg width="${textWidth}" height="${textHeight}" xmlns="http://www.w3.org/2000/svg"><text x="0" y="${baselineY}" font-family="Roboto, cursive" font-size="${dateFontSize}" fill="none" stroke="#ffffff" stroke-opacity="0.72" stroke-width="${Math.max(
           1.6,
           dateFontSize * 0.14
         )}" stroke-linejoin="round" letter-spacing="0.3">${escapeXml(
           dateText
-        )}</text><text x="0" y="${baselineY}" font-family="Caveat, Segoe Script, Brush Script MT, cursive" font-size="${dateFontSize}" fill="#111111" fill-opacity="0.82" letter-spacing="0.3">${escapeXml(
+        )}</text><text x="0" y="${baselineY}" font-family="Roboto, cursive" font-size="${dateFontSize}" fill="#111111" fill-opacity="0.82" letter-spacing="0.3">${escapeXml(
           dateText
         )}</text></svg>`;
 
@@ -1584,12 +1585,15 @@ router.post("/:sessionId/photostrip", async (req, res) => {
 
             const cloudinaryInstance = ensureCloudinary();
             if (cloudinaryInstance) {
+              // Wait 2.5 seconds to bypass Cloudinary tag indexing delay
+              await new Promise((resolve) => setTimeout(resolve, 2500));
               const gifResult = await cloudinaryInstance.uploader.multi(tag, {
                 format: "gif",
                 delay: 800, // 800ms between frames
               });
               session.metadata = session.metadata || {};
               session.metadata.gifUrl = gifResult.secure_url;
+              session.markModified('metadata');
               if (debugMode) {
                 console.log("[PHOTOSTRIP][DEBUG] Cloudinary GIF generated:", gifResult.secure_url);
               }
@@ -1808,6 +1812,64 @@ router.get("/:sessionId/share", async (req, res) => {
     return res.redirect(302, `${base}${location}`);
   } catch (err) {
     return res.status(500).json({ error: "Failed to resolve share URL", details: err.message });
+  }
+});
+
+// Upload compiled live photostrip to Cloudinary
+const upload = multer({ dest: "uploads/tmp/" });
+
+router.post("/:sessionId/upload-live-photostrip", upload.single("livePhotostrip"), async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    if (!req.file) {
+      return res.status(400).json({ error: "No video file provided" });
+    }
+
+    const session = await Session.findOne({ sessionId });
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const isCloudy = isCloudinaryConfigured();
+    if (!isCloudy) {
+      // Save locally if Cloudinary is not configured
+      const filename = `live-photostrip-${sessionId}-${Date.now()}.webm`;
+      const localPath = path.join(__dirname, "..", "..", "uploads", "photostrips", filename);
+      await fs.mkdir(path.dirname(localPath), { recursive: true });
+      await fs.rename(req.file.path, localPath);
+
+      const liveUrl = `/uploads/photostrips/${filename}`;
+      session.metadata = session.metadata || {};
+      session.metadata.livePhotostripUrl = liveUrl;
+      session.markModified("metadata");
+      await session.save();
+
+      return res.json({ livePhotostripUrl: liveUrl });
+    }
+
+    // Upload to Cloudinary
+    const fileBuf = await fs.readFile(req.file.path);
+    const uploadRes = await uploadImageBuffer(fileBuf, {
+      resource_type: "video",
+      folder: `giopix/sessions/${sessionId}/photostrips`,
+      public_id: `live-photostrip-${sessionId}-${Date.now()}`,
+    });
+
+    // Clean up temporary file
+    await fs.unlink(req.file.path).catch(() => {});
+
+    session.metadata = session.metadata || {};
+    session.metadata.livePhotostripUrl = uploadRes.secure_url;
+    session.markModified("metadata");
+    await session.save();
+
+    return res.json({ livePhotostripUrl: uploadRes.secure_url });
+  } catch (err) {
+    console.error("[LIVE-PHOTOSTRIP-UPLOAD] Error compiling / uploading:", err);
+    if (req.file && req.file.path) {
+      await fs.unlink(req.file.path).catch(() => {});
+    }
+    return res.status(500).json({ error: "Failed to upload live photostrip", details: err.message });
   }
 });
 

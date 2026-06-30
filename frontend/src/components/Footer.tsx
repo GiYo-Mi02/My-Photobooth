@@ -48,7 +48,7 @@ const Footer = () => {
           <div>
             <h3 className="text-sm font-semibold text-gray-900 mb-4">Features</h3>
             <ul className="space-y-2">
-              <li className="text-sm text-gray-600">10 Photo Sessions</li>
+              <li className="text-sm text-gray-600">Unlimited Photo Sessions</li>
               <li className="text-sm text-gray-600">Custom Templates</li>
               <li className="text-sm text-gray-600">Filter Effects</li>
               <li className="text-sm text-gray-600">Instant Photostrips</li>

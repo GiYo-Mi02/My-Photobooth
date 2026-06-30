@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 import toast from 'react-hot-toast';
+import LivePhotoCard from './LivePhotoCard';
 
 const ReviewStage = () => {
   const { photos, selectedPhotos, selectPhoto, deselectPhoto, nextStage, previousStage, currentTemplate } = usePhotoBoothStore();
@@ -88,10 +89,9 @@ const ReviewStage = () => {
                 className={`aspect-square rounded-lg overflow-hidden border-2 transition-all ${isSel ? 'border-primary-600 ring-2 ring-primary-500 ring-offset-2' : 'border-gray-300 hover:border-primary-400'}`}
                 title={isSel ? 'Deselect' : 'Select'}
               >
-                <img
-                  src={`http://localhost:5000${photo.path}`}
-                  alt={`Photo ${photo.photoNumber}`}
-                  className={`w-full h-full object-cover ${isSel ? 'scale-[1.02]' : ''}`}
+                <LivePhotoCard
+                  photo={photo}
+                  isSelected={isSel}
                 />
               </button>
             );

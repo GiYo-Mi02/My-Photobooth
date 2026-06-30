@@ -114,6 +114,7 @@ export const sessionService = {
       sharePath?: string;
       photosOnlyPath?: string;
       finalCompositePath?: string;
+      metadata?: any;
     };
     message: string;
   }> {
@@ -133,6 +134,7 @@ export const sessionService = {
         photostripPath: string;
         photosOnlyPath?: string;
         finalCompositePath?: string;
+        metadata?: any;
       };
       message: string;
   }>(`/sessions/${sessionId}/photostrip`, data);

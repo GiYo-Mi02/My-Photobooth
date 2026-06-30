@@ -49,6 +49,27 @@ export const photoService = {
     }>('/photos/upload', formData);
   },
 
+  // Upload photo with live video (FormData)
+  async uploadPhotoFormData(formData: FormData): Promise<{
+    photo: Photo;
+    session: {
+      id: string;
+      totalPhotos: number;
+      status: string;
+    };
+    message: string;
+  }> {
+    return apiClient.uploadFile<{
+      photo: Photo;
+      session: {
+        id: string;
+        totalPhotos: number;
+        status: string;
+      };
+      message: string;
+    }>('/photos/upload', formData);
+  },
+
   // Get photos for a session
   async getSessionPhotos(sessionId: string): Promise<{
     session: {

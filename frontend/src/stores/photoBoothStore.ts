@@ -7,7 +7,7 @@ interface PhotoBoothStore extends PhotoBoothState {
   // Actions
   createSession: () => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
-  uploadPhoto: (photoNumber: number, base64Data: string) => Promise<void>;
+  uploadPhoto: (photoNumber: number, base64Data: string, livePhotoBlob?: Blob) => Promise<void>;
   selectPhoto: (photoId: string) => void;
   deselectPhoto: (photoId: string) => void;
   selectMultiplePhotos: (photoIds: string[]) => Promise<void>;
@@ -128,16 +128,40 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
     }
   },
 
-  uploadPhoto: async (photoNumber: number, base64Data: string) => {
+  uploadPhoto: async (photoNumber: number, base64Data: string, livePhotoBlob?: Blob) => {
     const { session } = get();
     if (!session) throw new Error('No active session');
 
     try {
-      const response = await photoService.uploadPhoto({
-        sessionId: session.sessionId,
-        photoNumber,
-        base64Data,
-      });
+      let response;
+      if (livePhotoBlob) {
+        const formData = new FormData();
+        formData.append('sessionId', session.sessionId);
+        formData.append('photoNumber', String(photoNumber));
+
+        const arr = base64Data.split(',');
+        const mimeMatch = arr[0].match(/:(.*?);/);
+        const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        const photoFile = new File([u8arr], `photo-${photoNumber}.jpg`, { type: mime });
+        formData.append('photo', photoFile);
+
+        const livePhotoFile = new File([livePhotoBlob], `live-${photoNumber}.webm`, { type: 'video/webm' });
+        formData.append('livePhoto', livePhotoFile);
+
+        response = await photoService.uploadPhotoFormData(formData);
+      } else {
+        response = await photoService.uploadPhoto({
+          sessionId: session.sessionId,
+          photoNumber,
+          base64Data,
+        });
+      }
 
       const maxPhotos = session.settings?.maxPhotos ?? 6;
       set((state) => ({
@@ -225,6 +249,10 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
           photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
           finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
           status: 'completed',
+          metadata: {
+            ...state.session.metadata,
+            ...response.session.metadata,
+          },
         } : null,
         stage: 'complete',
       }));
@@ -269,7 +297,11 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
         photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
         finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
-        status: 'completed'
+        status: 'completed',
+        metadata: {
+          ...state.session.metadata,
+          ...response.session.metadata,
+        },
       } : null,
       stage: 'complete'
     }));
@@ -298,7 +330,11 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
         photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
         finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
-        status: 'completed'
+        status: 'completed',
+        metadata: {
+          ...state.session.metadata,
+          ...response.session.metadata,
+        },
       } : null,
       stage: 'complete'
     }));
@@ -327,7 +363,11 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
         photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
         finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
-        status: 'completed'
+        status: 'completed',
+        metadata: {
+          ...state.session.metadata,
+          ...response.session.metadata,
+        },
       } : null,
       stage: 'complete'
     }));
@@ -358,7 +398,11 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         sharePath: response.session.sharePath || response.photostrip.sharePath || displayPath,
         photosOnlyPath: response.session.photosOnlyPath || response.photostrip.photosOnlyPath,
         finalCompositePath: response.session.finalCompositePath || response.photostrip.finalCompositePath,
-        status: 'completed'
+        status: 'completed',
+        metadata: {
+          ...state.session.metadata,
+          ...response.session.metadata,
+        },
       } : null,
       stage: 'complete'
     }));

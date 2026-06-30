@@ -35,6 +35,8 @@ const CaptureStage = () => {
   const { autoCapture, startAutoCapture, stopAutoCapture, setAutoCountdown, setAutoInFlight } = usePhotoBoothStore();
   const autoTickTimerRef = useRef<number | null>(null);
   const transitionedRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   const { 
     session,
@@ -92,6 +94,9 @@ const CaptureStage = () => {
         clearInterval(timerRef.current);
       }
       if (autoTickTimerRef.current) clearTimeout(autoTickTimerRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try { mediaRecorderRef.current.stop(); } catch {}
+      }
       // Attempt to exit fullscreen if this component unmounts while active
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch {}
     };
@@ -172,9 +177,10 @@ const CaptureStage = () => {
     captureLockRef.current = true;
     setAutoInFlight(true);
     setShowFlash(true);
+    const livePhotoBlob = await stopRecording();
     const dataUrl = await reliableCapture();
     if (dataUrl) {
-      await uploadPhoto(currentPhotoNumber, dataUrl);
+      await uploadPhoto(currentPhotoNumber, dataUrl, livePhotoBlob || undefined);
       toast.success(`Photo ${currentPhotoNumber} captured!`);
     } else {
       console.warn('[Photobooth] reliableCapture returned null', lastResult);
@@ -193,6 +199,54 @@ const CaptureStage = () => {
     }, 400);
   }
 };
+
+  const startRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      return;
+    }
+    try {
+      const video = getVideoEl();
+      const stream = video?.srcObject as MediaStream;
+      if (!stream) {
+        console.warn('[LivePhoto] No webcam stream found on video element');
+        return;
+      }
+      chunksRef.current = [];
+      let options = { mimeType: 'video/webm;codecs=vp8' };
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options = { mimeType: 'video/mp4' };
+      }
+      const recorder = new MediaRecorder(stream, options);
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      console.log('[LivePhoto] Recording started');
+    } catch (err) {
+      console.error('[LivePhoto] Failed to start MediaRecorder:', err);
+    }
+  };
+
+  const stopRecording = (): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder || recorder.state === 'inactive') {
+        resolve(null);
+        return;
+      }
+      recorder.onstop = () => {
+        const type = recorder.mimeType || 'video/webm';
+        const videoBlob = new Blob(chunksRef.current, { type });
+        console.log(`[LivePhoto] Recording finished. Blob size: ${videoBlob.size} bytes (${type})`);
+        resolve(videoBlob);
+      };
+      recorder.stop();
+      mediaRecorderRef.current = null;
+    });
+  };
 
   const startTimer = (seconds: number) => {
     if (captureLockRef.current) return;
@@ -324,6 +378,15 @@ const CaptureStage = () => {
       if (autoTickTimerRef.current) clearTimeout(autoTickTimerRef.current);
     };
   }, [autoCapture.active, autoCapture.countdown, autoCapture.interval, autoCapture.inFlight, cameraReady, maxPhotos, nextStage, setAutoCountdown, stopAutoCapture]);
+
+  const activeCountdown = autoCapture.active ? autoCapture.countdown : countdown;
+  const activeCounting = autoCapture.active ? true : isCountingDown;
+
+  useEffect(() => {
+    if (activeCounting && activeCountdown === 3) {
+      startRecording();
+    }
+  }, [activeCounting, activeCountdown]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
