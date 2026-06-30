@@ -1547,71 +1547,14 @@ router.post("/:sessionId/photostrip", async (req, res) => {
 
     const finalBuffer = await finalPipeline.toBuffer();
     let finalUrlPath = `/uploads/photostrips/${outputFilename}`;
-    let cloudinaryPhotostripPath = null;
-
     try {
       // Always persist a local copy for kiosk/offline reliability.
       await fs.writeFile(outputPath, finalBuffer);
-      if (cloudinaryEnabled) {
-        try {
-          const uploaded = await uploadImageBuffer(finalBuffer, {
-            folder: cloudinaryFolder,
-            public_id: cloudinaryPublicIdBase,
-            format: "jpg",
-          });
-          cloudinaryPhotostripPath = uploaded.secure_url;
-          if (debugMode)
-            console.log(
-              "[PHOTOSTRIP][DEBUG] Also saved to Cloudinary:",
-              uploaded.public_id
-            );
-
-          // Upload individual selected photos to Cloudinary sequentially, then compile into an animated GIF
-          try {
-            const tag = `gpix-${sessionId}`;
-            for (let i = 0; i < selectedPhotoIds.length; i++) {
-              const photoId = selectedPhotoIds[i];
-              const photo = photosById.get(photoId.toString());
-              if (photo) {
-                const loadedPhoto = await loadPhotoInput(photo);
-                await uploadImageBuffer(loadedPhoto.input, {
-                  tags: [tag],
-                  public_id: `gpix-${sessionId}-frame-${i}`,
-                  folder: `giopix/sessions/${sessionId}`,
-                  overwrite: true,
-                });
-              }
-            }
-
-            const cloudinaryInstance = ensureCloudinary();
-            if (cloudinaryInstance) {
-              // Wait 2.5 seconds to bypass Cloudinary tag indexing delay
-              await new Promise((resolve) => setTimeout(resolve, 2500));
-              const gifResult = await cloudinaryInstance.uploader.multi(tag, {
-                format: "gif",
-                delay: 800, // 800ms between frames
-              });
-              session.metadata = session.metadata || {};
-              session.metadata.gifUrl = gifResult.secure_url;
-              session.markModified('metadata');
-              if (debugMode) {
-                console.log("[PHOTOSTRIP][DEBUG] Cloudinary GIF generated:", gifResult.secure_url);
-              }
-            }
-          } catch (gifErr) {
-            console.log("[PHOTOSTRIP][DEBUG] Failed to generate Cloudinary GIF:", gifErr.message);
-          }
-        } catch (cloudErr) {
-          console.log(
-            "[PHOTOSTRIP][DEBUG] Cloudinary save failed, local copy kept:",
-            cloudErr.message
-          );
-        }
-      }
     } catch (err) {
       console.log("[PHOTOSTRIP][DEBUG] Failed to write local photostrip", err.message);
       throw err;
     }
+
     if (debugMode) {
       const debugOut = outputPath.replace(/\.jpg$/i, "-debug.jpg");
       try {
@@ -1645,9 +1588,6 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       session.templateId = template._id;
     }
     session.metadata = session.metadata || {};
-    if (cloudinaryPhotostripPath) {
-      session.metadata.cloudinaryPhotostripPath = cloudinaryPhotostripPath;
-    }
     session.metadata.endTime = new Date();
     if (session.metadata.startTime) {
       session.metadata.duration =
@@ -1659,11 +1599,12 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       $inc: { usageCount: 1 },
     }).catch(() => {});
 
+    // Send HTTP Response immediately (Local files are ready on disk)
     res.json({
       photostrip: {
         path: session.photostripPath,
         url: session.photostripPath,
-        sharePath: cloudinaryPhotostripPath || session.photostripPath,
+        sharePath: session.photostripPath,
         qrShareUrl,
         template: template._id.toString(),
         photosUsed: overlays.length,
@@ -1691,7 +1632,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
         id: session.sessionId,
         status: session.status,
         photostripPath: session.photostripPath,
-        sharePath: cloudinaryPhotostripPath || session.photostripPath,
+        sharePath: session.photostripPath,
         photosOnlyPath: photosOnlyPathRef
           ? `/uploads/photostrips/${path.basename(photosOnlyPathRef)}`
           : undefined,
@@ -1699,6 +1640,62 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       },
       message: "Photostrip generated successfully",
     });
+
+    // Cloudinary background operations (Non-blocking)
+    if (cloudinaryEnabled) {
+      (async () => {
+        try {
+          // 1. Upload the high-quality compiled photostrip to Cloudinary
+          const uploaded = await uploadImageBuffer(finalBuffer, {
+            folder: cloudinaryFolder,
+            public_id: cloudinaryPublicIdBase,
+            format: "jpg",
+          });
+          const cloudinaryPhotostripPath = uploaded.secure_url;
+          
+          session.metadata = session.metadata || {};
+          session.metadata.cloudinaryPhotostripPath = cloudinaryPhotostripPath;
+          session.sharePath = cloudinaryPhotostripPath;
+          session.markModified("metadata");
+          await session.save();
+          console.log("[Cloudinary Background] Photostrip uploaded:", uploaded.secure_url);
+
+          // 2. Upload individual selected frames sequentially to tag them
+          const tag = `gpix-${sessionId}`;
+          for (let i = 0; i < selectedPhotoIds.length; i++) {
+            const photoId = selectedPhotoIds[i];
+            const photo = photosById.get(photoId.toString());
+            if (photo) {
+              const loadedPhoto = await loadPhotoInput(photo);
+              await uploadImageBuffer(loadedPhoto.input, {
+                tags: [tag],
+                public_id: `gpix-${sessionId}-frame-${i}`,
+                folder: `giopix/sessions/${sessionId}`,
+                overwrite: true,
+              });
+            }
+          }
+
+          // 3. Compile the animated GIF on Cloudinary's servers
+          const cloudinaryInstance = ensureCloudinary();
+          if (cloudinaryInstance) {
+            // Wait 2.5 seconds to bypass tag indexing delay
+            await new Promise((resolve) => setTimeout(resolve, 2500));
+            const gifResult = await cloudinaryInstance.uploader.multi(tag, {
+              format: "gif",
+              delay: 800,
+            });
+            
+            session.metadata.gifUrl = gifResult.secure_url;
+            session.markModified('metadata');
+            await session.save();
+            console.log("[Cloudinary Background] GIF generated successfully:", gifResult.secure_url);
+          }
+        } catch (cloudErr) {
+          console.warn("[Cloudinary Background] Photostrip/GIF background process failed:", cloudErr.message);
+        }
+      })();
+    }
   } catch (error) {
     console.error("Generate photostrip error:", error);
     res
