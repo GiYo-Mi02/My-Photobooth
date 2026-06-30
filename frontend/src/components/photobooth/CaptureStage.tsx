@@ -222,9 +222,15 @@ const CaptureStage = () => {
         return;
       }
       chunksRef.current = [];
-      let options = { mimeType: 'video/webm;codecs=vp8' };
+      let options: any = { 
+        mimeType: 'video/webm;codecs=vp8',
+        videoBitsPerSecond: 8000000
+      };
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: 'video/mp4' };
+        options = { 
+          mimeType: 'video/mp4',
+          videoBitsPerSecond: 8000000
+        };
       }
       const recorder = new MediaRecorder(stream, options);
       recorder.ondataavailable = (e) => {

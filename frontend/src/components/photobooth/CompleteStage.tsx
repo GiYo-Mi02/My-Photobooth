@@ -175,13 +175,22 @@ const CompleteStage = () => {
       // Start recording the canvas at 30 fps
       const stream = canvas.captureStream(30);
       
-      // Determine supported mimeTypes
-      let options = { mimeType: 'video/webm;codecs=vp9' };
+      // Determine supported mimeTypes and specify a high bitrate constraint
+      let options: any = { 
+        mimeType: 'video/webm;codecs=vp9',
+        videoBitsPerSecond: 10000000
+      };
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: 'video/webm' };
+        options = { 
+          mimeType: 'video/webm',
+          videoBitsPerSecond: 10000000
+        };
       }
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: 'video/mp4' };
+        options = { 
+          mimeType: 'video/mp4',
+          videoBitsPerSecond: 10000000
+        };
       }
 
       const chunks: Blob[] = [];
