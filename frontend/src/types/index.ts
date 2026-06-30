@@ -77,6 +77,7 @@ export interface SessionMetadata {
   startTime: string;
   endTime?: string;
   duration?: number;
+  gifUrl?: string;
 }
 
 export interface Template {

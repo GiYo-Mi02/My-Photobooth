@@ -23,8 +23,7 @@ const CaptureStage = () => {
   const fullWrapRef = useRef<HTMLDivElement | null>(null);
   const previewAnimRef = useRef<number | null>(null);
   const [isCountingDown, setIsCountingDown] = useState(false);
-  const [countdown, setCountdown] = useState(5);
-  const [selectedTimer, setSelectedTimer] = useState(5);
+  const [countdown, setCountdown] = useState(8);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [trayOpen, setTrayOpen] = useState(true);
   const [showUi, setShowUi] = useState(true);
@@ -35,6 +34,7 @@ const CaptureStage = () => {
   // Store-driven auto capture persistence
   const { autoCapture, startAutoCapture, stopAutoCapture, setAutoCountdown, setAutoInFlight } = usePhotoBoothStore();
   const autoTickTimerRef = useRef<number | null>(null);
+  const transitionedRef = useRef(false);
 
   const { 
     session,
@@ -248,7 +248,8 @@ const CaptureStage = () => {
   };
 
   useEffect(() => {
-    if (photos.length >= maxPhotos) {
+    if (photos.length >= maxPhotos && !transitionedRef.current) {
+      transitionedRef.current = true;
       cancelTimer();
       stopAutoCapture();
       setTimeout(() => {
@@ -302,7 +303,6 @@ const CaptureStage = () => {
           const current = usePhotoBoothStore.getState().photos.length;
           if (current >= maxPhotos) {
             stopAutoCapture();
-            setTimeout(() => nextStage(), 600);
             return;
           }
           setAutoCountdown(autoCapture.interval);
@@ -413,63 +413,54 @@ const CaptureStage = () => {
 
     {/* Controls (remain visible in fullscreen) */}
   <div className={(isFullscreen ? 'flex flex-col items-center space-y-4 px-4 pb-6 pt-4 bg-black/40 ' : 'flex flex-col items-center space-y-4 ') + (isFullscreen ? (showUi ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none') : '') + ' transition-opacity duration-200'}>
-          {photos.length < maxPhotos && (
+    {photos.length < maxPhotos && (
             <>
               <div className="flex flex-wrap items-center justify-center gap-2">
-                <span className="font-medium text-gray-700">Manual Timer: </span>
-                {[5, 10, 15].map((seconds) => (
-                  <button
-                    key={seconds}
-                    onClick={() => {
-                      setSelectedTimer(seconds);
-                      startTimer(seconds);
-                    }}
-                    disabled={isCountingDown || captureLockRef.current}
-                    className={`px-4 py-2 rounded-full border transition-colors ${
-                      selectedTimer === seconds && !isCountingDown
-                        ? 'bg-primary-500 text-white border-primary-500 shadow'
-                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
-                    } ${isCountingDown || captureLockRef.current ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {seconds}s
-                  </button>
-                ))}
+                <button
+                  onClick={() => {
+                    startTimer(8);
+                  }}
+                  disabled={isCountingDown || captureLockRef.current}
+                  className="px-6 py-2.5 rounded-full font-semibold border transition-all shadow-md bg-primary-600 text-white border-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Start 8s Timer
+                </button>
 
                 <div className="flex items-center gap-2">
                   {!autoCapture.active ? (
                     <button
-                      onClick={() => startAutoCapture(selectedTimer)}
+                      onClick={() => startAutoCapture(8)}
                       disabled={captureLockRef.current}
-                      className="px-5 py-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition whitespace-nowrap"
+                      className="px-5 py-2.5 rounded-full font-semibold bg-blue-600 text-white hover:bg-blue-700 transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Auto ({selectedTimer}s)
+                      Auto (8s)
                     </button>
                   ) : (
                     <button
                       onClick={stopAutoCapture}
-                      className="px-5 py-2 rounded-full bg-red-600 text-white hover:bg-red-700 transition"
+                      className="px-5 py-2.5 rounded-full font-semibold bg-red-600 text-white hover:bg-red-700 transition shadow-md"
                     >
                       Stop Auto
                     </button>
                   )}
                   {autoCapture.active && (
-                    <div className="flex items-center gap-1 text-xs text-gray-600">
-                      <span className="px-2 py-1 bg-gray-200 rounded-full">Interval {autoCapture.interval}s</span>
-                      <span className="px-2 py-1 bg-gray-200 rounded-full">T-{autoCapture.countdown}s</span>
-                      {autoCapture.inFlight && <span className="px-2 py-1 bg-blue-200 text-blue-700 rounded-full">Uploading…</span>}
+                    <div className="flex items-center gap-1.5 text-xs text-gray-700 font-medium">
+                      <span className="px-2.5 py-1 bg-gray-200 rounded-full">Interval 8s</span>
+                      <span className="px-2.5 py-1 bg-gray-200 rounded-full">T-{autoCapture.countdown}s</span>
+                      {autoCapture.inFlight && <span className="px-2.5 py-1 bg-blue-200 text-blue-800 rounded-full">Uploading…</span>}
                     </div>
                   )}
                 </div>
-                
-                {isCountingDown && (
-                  <button
-                    onClick={cancelTimer}
-                    className="px-4 py-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                )}
               </div>
+
+              {isCountingDown && (
+                <button
+                  onClick={cancelTimer}
+                  className="px-4 py-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
 
               <button
                 onClick={handleInstantCapture}

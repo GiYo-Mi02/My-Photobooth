@@ -167,12 +167,27 @@ const CompleteStage = () => {
                   Rio de Janeiro
                 </button>
               </div>
-              <img
-                src={previewPath ? `${apiClient.getFileUrl(previewPath)}?v=${Date.now()}` : ''}
-                alt="Photostrip"
-                className="max-h-[28rem] w-auto rounded-lg shadow bg-gray-50"
-                onError={(e)=>{(e.currentTarget as HTMLImageElement).style.opacity='0.3';}}
-              />
+              <div className="flex flex-col md:flex-row items-center justify-center gap-8 mb-6">
+                <div className="flex flex-col items-center">
+                  <span className="text-sm font-semibold text-gray-500 mb-2">Static Photostrip</span>
+                  <img
+                    src={previewPath ? `${apiClient.getFileUrl(previewPath)}?v=${Date.now()}` : ''}
+                    alt="Photostrip"
+                    className="max-h-[28rem] w-auto rounded-lg shadow bg-gray-50 animate-fade-in"
+                    onError={(e)=>{(e.currentTarget as HTMLImageElement).style.opacity='0.3';}}
+                  />
+                </div>
+                {session?.metadata?.gifUrl && (
+                  <div className="flex flex-col items-center animate-fade-in">
+                    <span className="text-sm font-semibold text-gray-500 mb-2">Animated GIF Moment</span>
+                    <img
+                      src={session.metadata.gifUrl}
+                      alt="Animated Moment"
+                      className="max-h-[28rem] w-auto rounded-lg shadow bg-gray-50"
+                    />
+                  </div>
+                )}
+              </div>
               <div className="mt-6 w-full max-w-xl">
                 <SharePanel url={shareUrl} />
               </div>
@@ -184,11 +199,24 @@ const CompleteStage = () => {
           )}
         </div>
 
-        <div className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
-          <button onClick={handleDownload} disabled={!session?.photostripPath} className="btn-primary inline-flex items-center justify-center disabled:opacity-60">
+        <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+          <button onClick={handleDownload} disabled={!session?.photostripPath} className="btn-primary inline-flex items-center justify-center disabled:opacity-60 w-full sm:w-auto">
             <FiDownload className="mr-2 h-5 w-5" />
             Download Photostrip
           </button>
+          {session?.metadata?.gifUrl && (
+            <a
+              href={session.metadata.gifUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              download="giopix-moment.gif"
+              className="btn-primary bg-purple-600 hover:bg-purple-700 border-purple-600 text-white inline-flex items-center justify-center w-full sm:w-auto text-center"
+              style={{ height: '46px', borderRadius: '12px' }}
+            >
+              <FiDownload className="mr-2 h-5 w-5" />
+              Download GIF
+            </a>
+          )}
           <button
             onClick={handlePrint}
             disabled={!session?.photostripPath}

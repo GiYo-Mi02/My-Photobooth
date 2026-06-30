@@ -50,7 +50,7 @@ const initialState: PhotoBoothState = {
 
 const initialAutoCapture = {
   active: false,
-  interval: 10,
+  interval: 8,
   countdown: 0,
   inFlight: false,
 };
@@ -89,7 +89,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
             createdAt: response.session.createdAt,
             updatedAt: response.session.createdAt,
         },
-        stage: prev.stage === 'intro' ? 'capture' : prev.stage,
+        stage: prev.stage === 'intro' ? 'template' : prev.stage,
       }));
     } catch (error) {
       console.error('Failed to create session:', error);
@@ -213,7 +213,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
         targetWidth: tw,
         targetHeight: th,
         forceOrientation: th >= tw ? 'portrait' : 'landscape',
-        customization: { autoLayout: true } as any,
+        customization: { autoLayout: true, respectTemplateSlots: true } as any,
       } as any);
 
       const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
@@ -288,7 +288,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       targetWidth: 1800,
       targetHeight: 1200,
       forceOrientation: 'landscape',
-      customization: { autoLayout: true },
+      customization: { autoLayout: true, respectTemplateSlots: true },
     } as any);
     const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
     set((state) => ({
@@ -317,7 +317,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
       targetWidth: 1200,
       targetHeight: 1800,
       forceOrientation: 'portrait',
-      customization: { autoLayout: true },
+      customization: { autoLayout: true, respectTemplateSlots: true },
     } as any);
     const displayPath = response.session.photostripPath || response.photostrip.url || response.photostrip.path;
     set((state) => ({
@@ -417,7 +417,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
 
   nextStage: () => {
     const { stage } = get();
-    const stages: PhotoBoothState['stage'][] = ['intro', 'capture', 'review', 'template', 'generate', 'complete'];
+    const stages: PhotoBoothState['stage'][] = ['intro', 'template', 'capture', 'review', 'generate', 'complete'];
     const currentIndex = stages.indexOf(stage);
     if (currentIndex < stages.length - 1) {
       const next = stages[currentIndex + 1];
@@ -427,7 +427,7 @@ export const usePhotoBoothStore = create<PhotoBoothStore>((originalSet, get) => 
 
   previousStage: () => {
     const { stage } = get();
-    const stages: PhotoBoothState['stage'][] = ['intro', 'capture', 'review', 'template', 'generate', 'complete'];
+    const stages: PhotoBoothState['stage'][] = ['intro', 'template', 'capture', 'review', 'generate', 'complete'];
     const currentIndex = stages.indexOf(stage);
     if (currentIndex > 0) {
       const prevStage = stages[currentIndex - 1];

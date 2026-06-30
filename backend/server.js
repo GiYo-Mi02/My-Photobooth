@@ -7,6 +7,7 @@ import mongoose from "mongoose";
 import path from "path";
 import { fileURLToPath } from "url";
 import User from "./models/User.js";
+import Session from "./models/Session.js";
 
 // Import routes
 import authRoutes from "./routes/auth.js";
@@ -125,6 +126,24 @@ app.use("/api/photos", photoRoutes);
 app.use("/api/templates", templateRoutes);
 app.use("/api/sessions", sessionRoutes);
 app.use("/api/admin", adminRoutes);
+
+// Short URL redirect endpoint
+app.get("/s/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await Session.findOne({ sessionId }).lean();
+    if (!session) return res.status(404).send("Session not found");
+    const resolvedSharePath = session.metadata?.gifUrl || session.metadata?.cloudinaryPhotostripPath || session.photostripPath;
+    if (!resolvedSharePath) return res.status(404).send("Share content not ready");
+    if (/^https?:\/\//i.test(resolvedSharePath)) {
+      return res.redirect(302, resolvedSharePath);
+    }
+    const base = `${req.protocol}://${req.get("host")}`;
+    return res.redirect(302, `${base}${resolvedSharePath}`);
+  } catch (err) {
+    return res.status(500).send("Error: " + err.message);
+  }
+});
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

@@ -4,7 +4,39 @@ import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 import toast from 'react-hot-toast';
 
 const ReviewStage = () => {
-  const { photos, selectedPhotos, selectPhoto, deselectPhoto, nextStage, previousStage } = usePhotoBoothStore();
+  const { photos, selectedPhotos, selectPhoto, deselectPhoto, nextStage, previousStage, currentTemplate } = usePhotoBoothStore();
+
+  const requiredCount = useMemo(() => {
+    if (!currentTemplate || !Array.isArray(currentTemplate.photoSlots) || currentTemplate.photoSlots.length === 0) {
+      return 4; // fallback
+    }
+    const slots = currentTemplate.photoSlots;
+    const w = currentTemplate.dimensions?.width || 1200;
+    
+    const isTwinStrip = (() => {
+      if (slots.length % 2 !== 0) return false;
+      const midX = w / 2;
+      const leftSlots = slots.filter((s) => (s.x + s.width / 2) < midX);
+      const rightSlots = slots.filter((s) => (s.x + s.width / 2) >= midX);
+      
+      if (leftSlots.length !== rightSlots.length) return false;
+      
+      const leftSorted = [...leftSlots].sort((a, b) => a.y - b.y);
+      const rightSorted = [...rightSlots].sort((a, b) => a.y - b.y);
+      
+      for (let i = 0; i < leftSorted.length; i++) {
+        if (Math.abs(leftSorted[i].y - rightSorted[i].y) > 15) {
+          return false;
+        }
+      }
+      return true;
+    })();
+
+    if (isTwinStrip) {
+      return slots.length / 2;
+    }
+    return slots.length;
+  }, [currentTemplate]);
 
   const selectedIds = useMemo(() => new Set(selectedPhotos.map(p => p._id)), [selectedPhotos]);
 
@@ -12,8 +44,8 @@ const ReviewStage = () => {
     if (selectedIds.has(photoId)) {
       deselectPhoto(photoId);
     } else {
-      if (selectedPhotos.length >= 4) {
-        toast.error('You can only select exactly 4 photos');
+      if (selectedPhotos.length >= requiredCount) {
+        toast.error(`You can only select exactly ${requiredCount} photos`);
         return;
       }
       selectPhoto(photoId);
@@ -21,8 +53,8 @@ const ReviewStage = () => {
   };
 
   const handleContinue = () => {
-    if (selectedPhotos.length !== 4) {
-      toast.error('Please select exactly 4 photos to continue');
+    if (selectedPhotos.length !== requiredCount) {
+      toast.error(`Please select exactly ${requiredCount} photos to continue`);
       return;
     }
     nextStage();
@@ -40,8 +72,8 @@ const ReviewStage = () => {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             Review Your Photos
           </h1>
-          <p className="text-gray-600">
-            Select your favorite photos for the photostrip
+          <p className="text-gray-600 font-medium text-primary-600">
+            Select exactly {requiredCount} photos for the photostrip
           </p>
         </div>
 

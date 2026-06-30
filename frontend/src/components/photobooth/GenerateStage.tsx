@@ -4,7 +4,7 @@ import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 import toast from 'react-hot-toast';
 
 const GenerateStage = () => {
-  const { nextStage, previousStage, generatePhotostrip, generatePhotostripDual3x2, selectedPhotos } = usePhotoBoothStore();
+  const { nextStage, previousStage, generatePhotostrip, generatePhotostripDual3x2, selectedPhotos, currentTemplate } = usePhotoBoothStore();
   const [useDual, setUseDual] = useState(true);
   const [isGenerating, setIsGenerating] = useState(true);
 
@@ -15,7 +15,7 @@ const GenerateStage = () => {
     let mounted = true;
     (async () => {
       try {
-        if (useDual && selectedPhotos.length >= 1) {
+        if (useDual && selectedPhotos.length >= 1 && (!currentTemplate || !currentTemplate.photoSlots || currentTemplate.photoSlots.length === 0)) {
           await generatePhotostripDual3x2();
         } else {
           await generatePhotostrip();
@@ -64,7 +64,7 @@ const GenerateStage = () => {
 
         <div className="flex justify-center space-x-4">
           <button onClick={previousStage} className="btn-secondary">
-            Back to Templates
+            Back to Review
           </button>
           <button onClick={nextStage} disabled={isGenerating} className="btn-primary disabled:opacity-60">
             View Result

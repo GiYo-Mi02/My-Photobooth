@@ -99,10 +99,10 @@ const TemplateStage = () => {
 
         <div className="flex justify-center space-x-4">
           <button onClick={previousStage} className="btn-secondary">
-            Back to Review
+            Back to Start
           </button>
           <button onClick={nextStage} disabled={!currentTemplate} className="btn-primary disabled:opacity-60">
-            Generate Photostrip
+            Continue to Camera
           </button>
         </div>
       </motion.div>

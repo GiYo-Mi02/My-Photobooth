@@ -65,6 +65,7 @@ const sessionSchema = new mongoose.Schema(
       },
       endTime: Date,
       duration: Number, // in milliseconds
+      gifUrl: String,
     },
   },
   {

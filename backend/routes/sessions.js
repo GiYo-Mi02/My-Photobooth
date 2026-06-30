@@ -14,7 +14,7 @@ import sharp from "sharp";
 import QRCode from "qrcode";
 
 import mongoose from "mongoose";
-import { isCloudinaryConfigured, uploadImageBuffer } from "../lib/cloudinary.js";
+import { isCloudinaryConfigured, uploadImageBuffer, ensureCloudinary } from "../lib/cloudinary.js";
 
 // Simple XML escape for dynamic footer text
 const escapeXml = (str = "") =>
@@ -49,6 +49,41 @@ const trimTrailingSlashes = (value = "") => String(value).replace(/\/+$/, "");
 
 const cleanEnvValue = (value = "") =>
   String(value).trim().replace(/^['\"]|['\"]$/g, "");
+
+const isTwinStripLayout = (slots, outputWidth) => {
+  if (!Array.isArray(slots) || slots.length === 0 || slots.length % 2 !== 0) {
+    return false;
+  }
+  const midX = outputWidth / 2;
+  const leftSlots = slots.filter((s) => s.x + s.width / 2 < midX);
+  const rightSlots = slots.filter((s) => s.x + s.width / 2 >= midX);
+  
+  if (leftSlots.length !== rightSlots.length) {
+    return false;
+  }
+  
+  const leftSorted = [...leftSlots].sort((a, b) => a.y - b.y);
+  const rightSorted = [...rightSlots].sort((a, b) => a.y - b.y);
+  
+  for (let i = 0; i < leftSorted.length; i++) {
+    if (Math.abs(leftSorted[i].y - rightSorted[i].y) > 15) {
+      return false;
+    }
+  }
+  
+  return true;
+};
+
+const sortSlotsGridOrder = (slots) => {
+  const sorted = [...slots];
+  sorted.sort((a, b) => {
+    if (Math.abs(a.y - b.y) < 20) {
+      return a.x - b.x;
+    }
+    return a.y - b.y;
+  });
+  return sorted;
+};
 
 const buildCloudinaryImageUrl = (publicId, format = "jpg") => {
   const cloudName = cleanEnvValue(process.env.CLOUDINARY_CLOUD_NAME);
@@ -274,7 +309,7 @@ const resolveSlots = ({
     : [];
   const preferTemplatePanel =
     layout === "dual3x2" && customization?.preferTemplatePanel !== false;
-  const respectTemplateOverride = customization?.respectTemplateSlots === true;
+  const respectTemplateOverride = customization?.respectTemplateSlots !== false;
   const hasTemplateSlots =
     templateSlots.length >= count &&
     (customization?.autoLayout !== true ||
@@ -508,19 +543,18 @@ router.post("/:sessionId/photostrip", async (req, res) => {
       customization,
     });
 
-    // If the template has slots and we are mirroring (template slots is twice the number of selected photos),
-    // let's partition them to left/right columns and sort top-to-bottom so order of slot addition doesn't confuse the system.
+    // Determine whether to treat as a twin strip layout or standard grid layout
     let orderedSlots = [...slotDefinitions];
-    if (slotDefinitions.length === 2 * selectedPhotoIds.length && selectedPhotoIds.length > 0) {
+    if (isTwinStripLayout(slotDefinitions, outputWidth)) {
       const midX = outputWidth / 2;
       const leftSlots = slotDefinitions.filter(s => (s.x + s.width / 2) < midX)
                                        .sort((a, b) => a.y - b.y);
       const rightSlots = slotDefinitions.filter(s => (s.x + s.width / 2) >= midX)
                                         .sort((a, b) => a.y - b.y);
-      
-      if (leftSlots.length === selectedPhotoIds.length && rightSlots.length === selectedPhotoIds.length) {
-        orderedSlots = [...leftSlots, ...rightSlots];
-      }
+      orderedSlots = [...leftSlots, ...rightSlots];
+    } else {
+      // Just sort in natural grid layout order (top-to-bottom, left-to-right)
+      orderedSlots = sortSlotsGridOrder(slotDefinitions);
     }
 
     const debugMode =
@@ -1413,16 +1447,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
     const cloudinaryPublicIdBase = `${sessionId}-${Date.now()}`;
     const cloudinaryFolder = "giopix/photostrips";
     const cloudinaryPublicId = `${cloudinaryFolder}/${cloudinaryPublicIdBase}`;
-    let qrShareUrl = `${resolvePublicBaseUrl(req)}/api/sessions/${encodeURIComponent(
-      sessionId
-    )}/share`;
-    if (cloudinaryEnabled) {
-      const directCloudinaryUrl = buildCloudinaryImageUrl(
-        cloudinaryPublicId,
-        "jpg"
-      );
-      if (directCloudinaryUrl) qrShareUrl = directCloudinaryUrl;
-    }
+    let qrShareUrl = `${resolvePublicBaseUrl(req)}/s/${sessionId}`;
     if (embedQr) {
       try {
         const qrSize = clampNumber(
@@ -1452,7 +1477,7 @@ router.post("/:sessionId/photostrip", async (req, res) => {
             dark: "#000000",
             light: "#FFFFFF",
           },
-          errorCorrectionLevel: "M",
+          errorCorrectionLevel: "L",
         });
 
         const panelSvg = `<svg width="${panelSize}" height="${panelSize}" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="${panelSize}" height="${panelSize}" rx="${Math.round(
@@ -1539,6 +1564,39 @@ router.post("/:sessionId/photostrip", async (req, res) => {
               "[PHOTOSTRIP][DEBUG] Also saved to Cloudinary:",
               uploaded.public_id
             );
+
+          // Upload individual selected photos to Cloudinary sequentially, then compile into an animated GIF
+          try {
+            const tag = `gpix-${sessionId}`;
+            for (let i = 0; i < selectedPhotoIds.length; i++) {
+              const photoId = selectedPhotoIds[i];
+              const photo = photosById.get(photoId.toString());
+              if (photo) {
+                const loadedPhoto = await loadPhotoInput(photo);
+                await uploadImageBuffer(loadedPhoto.input, {
+                  tags: [tag],
+                  public_id: `gpix-${sessionId}-frame-${i}`,
+                  folder: `giopix/sessions/${sessionId}`,
+                  overwrite: true,
+                });
+              }
+            }
+
+            const cloudinaryInstance = ensureCloudinary();
+            if (cloudinaryInstance) {
+              const gifResult = await cloudinaryInstance.uploader.multi(tag, {
+                format: "gif",
+                delay: 800, // 800ms between frames
+              });
+              session.metadata = session.metadata || {};
+              session.metadata.gifUrl = gifResult.secure_url;
+              if (debugMode) {
+                console.log("[PHOTOSTRIP][DEBUG] Cloudinary GIF generated:", gifResult.secure_url);
+              }
+            }
+          } catch (gifErr) {
+            console.log("[PHOTOSTRIP][DEBUG] Failed to generate Cloudinary GIF:", gifErr.message);
+          }
         } catch (cloudErr) {
           console.log(
             "[PHOTOSTRIP][DEBUG] Cloudinary save failed, local copy kept:",
