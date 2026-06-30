@@ -177,8 +177,19 @@ const CaptureStage = () => {
     captureLockRef.current = true;
     setAutoInFlight(true);
     setShowFlash(true);
-    const livePhotoBlob = await stopRecording();
+
+    // 1. Capture the static photo immediately at countdown 0
     const dataUrl = await reliableCapture();
+
+    // Fade out flash
+    setTimeout(() => setShowFlash(false), 240);
+
+    // 2. Keep recording the live video for 2 more seconds (post-pose state)
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // 3. Stop recording the webcam to get the live video blob
+    const livePhotoBlob = await stopRecording();
+
     if (dataUrl) {
       await uploadPhoto(currentPhotoNumber, dataUrl, livePhotoBlob || undefined);
       toast.success(`Photo ${currentPhotoNumber} captured!`);
@@ -188,7 +199,6 @@ const CaptureStage = () => {
       // Single scheduled retry
       setTimeout(() => { if (!captureLockRef.current) capturePhoto(); }, 900);
     }
-    setTimeout(() => setShowFlash(false), 240);
   } catch (error) {
     console.error('[Photobooth] Failed to capture photo:', error);
     toast.error('Failed to capture photo');
@@ -383,7 +393,7 @@ const CaptureStage = () => {
   const activeCounting = autoCapture.active ? true : isCountingDown;
 
   useEffect(() => {
-    if (activeCounting && activeCountdown === 3) {
+    if (activeCounting && activeCountdown <= 4 && (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive')) {
       startRecording();
     }
   }, [activeCounting, activeCountdown]);

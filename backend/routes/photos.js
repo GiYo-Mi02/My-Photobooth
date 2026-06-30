@@ -174,56 +174,18 @@ router.post(
       livePhotoPath = `/uploads/photos/${req.files.livePhoto[0].filename}`;
     }
 
-    // Upload to Cloudinary if configured
-    let cloudinaryData = null;
-    let cloudinaryLiveUrl = null;
-    const cloudinaryEnabled = isCloudinaryConfigured();
-
-    if (cloudinaryEnabled) {
-      try {
-        const photoBuf = await fs.readFile(photoPath);
-        const uploadRes = await uploadImageBuffer(photoBuf, {
-          folder: `giopix/sessions/${sessionId}/photos`,
-          public_id: `photo-${assignedPhotoNumber}-${Date.now()}`,
-          format: "jpg",
-        });
-        cloudinaryData = {
-          publicId: uploadRes.public_id,
-          version: uploadRes.version,
-          secureUrl: uploadRes.secure_url,
-        };
-      } catch (err) {
-        console.warn("[UPLOAD] Cloudinary photo upload failed, using local fallback:", err.message);
-      }
-
-      if (req.files && req.files.livePhoto && req.files.livePhoto[0]) {
-        try {
-          const liveFile = req.files.livePhoto[0];
-          const liveBuf = await fs.readFile(liveFile.path);
-          const uploadRes = await uploadImageBuffer(liveBuf, {
-            resource_type: "video",
-            folder: `giopix/sessions/${sessionId}/live-photos`,
-            public_id: `live-${assignedPhotoNumber}-${Date.now()}`,
-          });
-          cloudinaryLiveUrl = uploadRes.secure_url;
-        } catch (err) {
-          console.warn("[UPLOAD] Cloudinary live video upload failed, using local fallback:", err.message);
-        }
-      }
-    }
-
     // Get image metadata
     const metadata = await sharp(photoPath).metadata();
+    const cloudinaryEnabled = isCloudinaryConfigured();
 
-    // Create photo document
+    // Create photo document with local path first to return response immediately
     const photo = new Photo({
       sessionId: session._id,
       filename,
       originalName,
-      path: cloudinaryData?.secureUrl || `/uploads/photos/${filename}`,
-      livePhotoPath: cloudinaryLiveUrl || livePhotoPath,
-      storageProvider: cloudinaryData ? "cloudinary" : "local",
-      cloudinary: cloudinaryData || undefined,
+      path: `/uploads/photos/${filename}`,
+      livePhotoPath,
+      storageProvider: "local",
       size: fileSize,
       mimeType,
       photoNumber: assignedPhotoNumber,
@@ -255,6 +217,50 @@ router.post(
         status: updatedSession.status,
       },
     });
+
+    // Cloudinary background uploads (Non-blocking)
+    if (cloudinaryEnabled) {
+      (async () => {
+        try {
+          const photoBuf = await fs.readFile(photoPath);
+          const uploadRes = await uploadImageBuffer(photoBuf, {
+            folder: `giopix/sessions/${sessionId}/photos`,
+            public_id: `photo-${assignedPhotoNumber}-${Date.now()}`,
+            format: "jpg",
+          });
+          
+          photo.path = uploadRes.secure_url;
+          photo.cloudinary = {
+            publicId: uploadRes.public_id,
+            version: uploadRes.version,
+            secureUrl: uploadRes.secure_url,
+          };
+          photo.storageProvider = "cloudinary";
+          await photo.save();
+          console.log(`[Cloudinary Background] Photo #${assignedPhotoNumber} uploaded:`, uploadRes.secure_url);
+        } catch (err) {
+          console.warn("[Cloudinary Background] Photo upload failed:", err.message);
+        }
+
+        if (req.files && req.files.livePhoto && req.files.livePhoto[0]) {
+          try {
+            const liveFile = req.files.livePhoto[0];
+            const liveBuf = await fs.readFile(liveFile.path);
+            const uploadRes = await uploadImageBuffer(liveBuf, {
+              resource_type: "video",
+              folder: `giopix/sessions/${sessionId}/live-photos`,
+              public_id: `live-${assignedPhotoNumber}-${Date.now()}`,
+            });
+            
+            photo.livePhotoPath = uploadRes.secure_url;
+            await photo.save();
+            console.log(`[Cloudinary Background] Live video #${assignedPhotoNumber} uploaded:`, uploadRes.secure_url);
+          } catch (err) {
+            console.warn("[Cloudinary Background] Live video upload failed:", err.message);
+          }
+        }
+      })();
+    }
   } catch (error) {
     console.error("Photo upload error:", error);
     res.status(500).json({

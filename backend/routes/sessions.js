@@ -14,7 +14,7 @@ import sharp from "sharp";
 import QRCode from "qrcode";
 
 import mongoose from "mongoose";
-import { isCloudinaryConfigured, uploadImageBuffer, ensureCloudinary } from "../lib/cloudinary.js";
+import { isCloudinaryConfigured, uploadImageBuffer, uploadImagePath, ensureCloudinary } from "../lib/cloudinary.js";
 import multer from "multer";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1847,13 +1847,25 @@ router.post("/:sessionId/upload-live-photostrip", upload.single("livePhotostrip"
       return res.json({ livePhotostripUrl: liveUrl });
     }
 
-    // Upload to Cloudinary
-    const fileBuf = await fs.readFile(req.file.path);
-    const uploadRes = await uploadImageBuffer(fileBuf, {
-      resource_type: "video",
-      folder: `giopix/sessions/${sessionId}/photostrips`,
-      public_id: `live-photostrip-${sessionId}-${Date.now()}`,
-    });
+    // Upload to Cloudinary using robust file path streaming with retries
+    let uploadRes = null;
+    let attempts = 0;
+    const maxAttempts = 3;
+    while (attempts < maxAttempts) {
+      try {
+        attempts++;
+        uploadRes = await uploadImagePath(req.file.path, {
+          resource_type: "video",
+          folder: `giopix/sessions/${sessionId}/photostrips`,
+          public_id: `live-photostrip-${sessionId}-${Date.now()}`,
+        });
+        break; // Success!
+      } catch (uploadErr) {
+        console.warn(`[Cloudinary Live Strip Upload] Attempt ${attempts} failed: ${uploadErr.message}`);
+        if (attempts >= maxAttempts) throw uploadErr;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
 
     // Clean up temporary file
     await fs.unlink(req.file.path).catch(() => {});

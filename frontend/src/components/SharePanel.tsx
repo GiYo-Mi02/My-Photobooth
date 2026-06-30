@@ -4,9 +4,10 @@ import { FiShare2, FiLink } from 'react-icons/fi';
 
 type Props = {
   url: string;
+  title?: string;
 };
 
-export const SharePanel: React.FC<Props> = ({ url }) => {
+export const SharePanel: React.FC<Props> = ({ url, title = 'Share' }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export const SharePanel: React.FC<Props> = ({ url }) => {
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold text-gray-900">Share</h3>
+        <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
         {canWebShare && (
           <button onClick={handleShare} className="btn-secondary inline-flex items-center">
             <FiShare2 className="mr-2" /> Share

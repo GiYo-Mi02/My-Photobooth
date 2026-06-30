@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
-import { useState } from 'react';
-import { FiDownload, FiRefreshCw, FiPrinter, FiFilm } from 'react-icons/fi';
+import { useState, useEffect } from 'react';
+import { FiDownload, FiRefreshCw, FiPrinter } from 'react-icons/fi';
 import { usePhotoBoothStore } from '../../stores/photoBoothStore';
 import { apiClient } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -104,6 +104,74 @@ const CompleteStage = () => {
         throw new Error('Please open the "Live Strip" tab first so the videos are loaded on screen!');
       }
 
+      // Define template over photos boolean
+      const templateOverPhotos = (currentTemplate.metadata as any)?.templateOverPhotos === true;
+
+      // Draw loop at 30 fps (approx. 33ms) - setInterval bypasses browser tab inactivity throttling
+      const drawInterval = setInterval(() => {
+        // Clear canvas
+        ctx.clearRect(0, 0, tWidth, tHeight);
+
+        // If template is background
+        if (!templateOverPhotos) {
+          ctx.drawImage(templateImg, 0, 0, tWidth, tHeight);
+        }
+
+        // Draw videos in slots
+        currentTemplate.photoSlots.forEach((slot, index) => {
+          const mediaEl = (document.getElementById(`strip-video-${index}`) || document.getElementById(`strip-img-${index}`)) as HTMLVideoElement | HTMLImageElement | null;
+          if (mediaEl) {
+            const isVideo = mediaEl instanceof HTMLVideoElement;
+            const ready = isVideo ? (mediaEl as HTMLVideoElement).readyState >= 2 : (mediaEl as HTMLImageElement).complete;
+            if (ready) {
+              ctx.save();
+              
+              // Apply positioning and rotation
+              const centerX = slot.x + slot.width / 2;
+              const centerY = slot.y + slot.height / 2;
+              ctx.translate(centerX, centerY);
+              if (slot.rotation) {
+                ctx.rotate((slot.rotation * Math.PI) / 180);
+              }
+              
+              // Calculate object-fit: cover crop bounds to prevent stretching
+              const mediaWidth = isVideo ? (mediaEl as HTMLVideoElement).videoWidth : (mediaEl as HTMLImageElement).naturalWidth;
+              const mediaHeight = isVideo ? (mediaEl as HTMLVideoElement).videoHeight : (mediaEl as HTMLImageElement).naturalHeight;
+              
+              if (mediaWidth && mediaHeight) {
+                const mediaAspectRatio = mediaWidth / mediaHeight;
+                const slotAspectRatio = slot.width / slot.height;
+                
+                let sx = 0, sy = 0, sw = mediaWidth, sh = mediaHeight;
+                
+                if (mediaAspectRatio > slotAspectRatio) {
+                  sw = mediaHeight * slotAspectRatio;
+                  sx = (mediaWidth - sw) / 2;
+                } else {
+                  sh = mediaWidth / slotAspectRatio;
+                  sy = (mediaHeight - sh) / 2;
+                }
+                
+                ctx.drawImage(
+                  mediaEl,
+                  sx, sy, sw, sh,
+                  -slot.width / 2, -slot.height / 2, slot.width, slot.height
+                );
+              } else {
+                ctx.drawImage(mediaEl, -slot.width / 2, -slot.height / 2, slot.width, slot.height);
+              }
+              
+              ctx.restore();
+            }
+          }
+        });
+
+        // If template is overlay
+        if (templateOverPhotos) {
+          ctx.drawImage(templateImg, 0, 0, tWidth, tHeight);
+        }
+      }, 33);
+
       // Start recording the canvas at 30 fps
       const stream = canvas.captureStream(30);
       
@@ -125,72 +193,26 @@ const CompleteStage = () => {
         }
       };
 
-      // Define drawing loop
-      const templateOverPhotos = (currentTemplate.metadata as any)?.templateOverPhotos === true;
-      let animationFrameId = 0;
-
-      const drawFrame = () => {
-        // Clear canvas
-        ctx.clearRect(0, 0, tWidth, tHeight);
-
-        // If template is background
-        if (!templateOverPhotos) {
-          ctx.drawImage(templateImg, 0, 0, tWidth, tHeight);
-        }
-
-        // Draw videos in slots
-        currentTemplate.photoSlots.forEach((slot, index) => {
-          const videoEl = document.getElementById(`strip-video-${index}`) as HTMLVideoElement | null;
-          if (videoEl && videoEl.readyState >= 2) {
-            ctx.save();
-            
-            // Apply positioning and rotation
-            const centerX = slot.x + slot.width / 2;
-            const centerY = slot.y + slot.height / 2;
-            ctx.translate(centerX, centerY);
-            if (slot.rotation) {
-              ctx.rotate((slot.rotation * Math.PI) / 180);
-            }
-            
-            // Draw video centered
-            ctx.drawImage(
-              videoEl,
-              -slot.width / 2,
-              -slot.height / 2,
-              slot.width,
-              slot.height
-            );
-            
-            ctx.restore();
-          }
-        });
-
-        // If template is overlay
-        if (templateOverPhotos) {
-          ctx.drawImage(templateImg, 0, 0, tWidth, tHeight);
-        }
-
-        animationFrameId = requestAnimationFrame(drawFrame);
-      };
-
-      // Start drawing
-      drawFrame();
-      mediaRecorder.start();
-
-      // Record for exactly 3 seconds
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-
-      // Stop recording
-      mediaRecorder.stop();
-      cancelAnimationFrame(animationFrameId);
-
-      // Wait for the stop event to compile blob
-      const videoBlob = await new Promise<Blob>((resolve) => {
+      // Set up the stop promise before stopping the recorder to prevent race conditions
+      const videoBlobPromise = new Promise<Blob>((resolve) => {
         mediaRecorder.onstop = () => {
           const blob = new Blob(chunks, { type: options.mimeType.split(';')[0] });
           resolve(blob);
         };
       });
+
+      // Start recording
+      mediaRecorder.start();
+
+      // Record for exactly 6 seconds
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+
+      // Stop recording and clear draw loop
+      mediaRecorder.stop();
+      clearInterval(drawInterval);
+
+      // Await compiled video data from listener
+      const videoBlob = await videoBlobPromise;
 
       // Upload the compiled video blob to backend
       const formData = new FormData();
@@ -216,6 +238,16 @@ const CompleteStage = () => {
       setIsCompilingLiveVideo(false);
     }
   };
+
+  useEffect(() => {
+    // Wait slightly for DOM videos to play and settle, then auto compile and upload
+    if (currentTemplate && selectedPhotos.length > 0 && !liveVideoUrl && !isCompilingLiveVideo) {
+      const timer = setTimeout(() => {
+        compileLiveVideo();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [currentTemplate, selectedPhotos, liveVideoUrl]);
 
   const handleDownloadLiveVideo = async () => {
     if (!liveVideoUrl) return;
@@ -469,8 +501,15 @@ const CompleteStage = () => {
                   ))}
                 </div>
               </div>
-              <div className="mt-6 w-full max-w-xl">
-                <SharePanel url={shareUrl} />
+              <div className="mt-6 w-full max-w-2xl">
+                {liveVideoUrl ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <SharePanel url={shareUrl} title="Scan for Static Strip" />
+                    <SharePanel url={liveVideoUrl} title="Scan for Live Strip" />
+                  </div>
+                ) : (
+                  <SharePanel url={shareUrl} title="Scan for Static Strip" />
+                )}
               </div>
             </div>
           ) : (
@@ -498,37 +537,15 @@ const CompleteStage = () => {
               Download GIF
             </a>
           )}
-          {selectedPhotos.some(p => p.livePhotoPath) && (
-            liveVideoUrl ? (
-              <button
-                onClick={handleDownloadLiveVideo}
-                className="btn-primary bg-amber-600 hover:bg-amber-700 border-amber-600 text-white inline-flex items-center justify-center w-full sm:w-auto"
-                style={{ height: '46px', borderRadius: '12px' }}
-              >
-                <FiDownload className="mr-2 h-5 w-5" />
-                Download Live Strip
-              </button>
-            ) : (
-              <button
-                onClick={compileLiveVideo}
-                disabled={isCompilingLiveVideo || activeTab !== 'live'}
-                className="btn-primary bg-amber-500 hover:bg-amber-600 border-amber-500 text-white inline-flex items-center justify-center w-full sm:w-auto disabled:opacity-60"
-                style={{ height: '46px', borderRadius: '12px' }}
-                title={activeTab !== 'live' ? 'Switch to "Live Strip" tab first to enable compilation' : ''}
-              >
-                {isCompilingLiveVideo ? (
-                  <>
-                    <div className="loading-spinner w-5 h-5 mr-2 border-white border-t-transparent inline-block align-middle" />
-                    Compiling (3s)...
-                  </>
-                ) : (
-                  <>
-                    <FiFilm className="mr-2 h-5 w-5" />
-                    Save Live Strip to Cloud
-                  </>
-                )}
-              </button>
-            )
+          {selectedPhotos.some(p => p.livePhotoPath) && liveVideoUrl && (
+            <button
+              onClick={handleDownloadLiveVideo}
+              className="btn-primary bg-amber-600 hover:bg-amber-700 border-amber-600 text-white inline-flex items-center justify-center w-full sm:w-auto"
+              style={{ height: '46px', borderRadius: '12px' }}
+            >
+              <FiDownload className="mr-2 h-5 w-5" />
+              Download Live Strip
+            </button>
           )}
           <button
             onClick={handlePrint}

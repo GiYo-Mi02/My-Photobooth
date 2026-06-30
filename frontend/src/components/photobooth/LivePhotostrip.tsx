@@ -73,6 +73,7 @@ export const LivePhotostrip = ({
               />
             ) : (
               <img
+                id={`strip-img-${index}`}
                 src={getUrl(photo.path)}
                 alt={`Photo ${photo.photoNumber}`}
                 className="w-full h-full object-cover"
